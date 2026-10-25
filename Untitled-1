@@ -1,0 +1,10 @@
+This is a repo to build a tool for Sarah and myself.
+
+It will be a wrapper around yt-dlp.
+it will need to run on mac
+it will need to be a gui
+it will need to be updateable (the app itself and the underlying youtube tool)
+it should let the user plug in a single youtube link, list of links in text or a youtube channel or subscription or playlist
+it should let the user download video or mp3
+it should allow allowing the user to pick names/conventions
+It should have pinned versions
