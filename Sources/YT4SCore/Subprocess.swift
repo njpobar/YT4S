@@ -65,6 +65,10 @@ public enum Subprocess {
                 }
                 do {
                     try process.run()
+                    // `onCancel` only terminates a running child: a cancel that landed before
+                    // launch would otherwise let it run to completion. The flag is set before
+                    // `onCancel` runs, so one of the two always sees it.
+                    if Task.isCancelled { process.terminate() }
                 } catch {
                     process.terminationHandler = nil
                     continuation.resume(throwing: error)
