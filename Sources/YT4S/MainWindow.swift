@@ -17,6 +17,9 @@ struct MainWindow: View {
             FormatRow(options: $model.options)
                 .padding(.top, 12)
 
+            NamingRow(options: $model.options)
+                .padding(.top, 12)
+
             HStack(alignment: .bottom) {
                 VStack(alignment: .leading, spacing: 5) {
                     SectionLabel("Save to")
@@ -118,6 +121,28 @@ private struct FormatRow: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
+        }
+    }
+}
+
+/// "File names": the Naming pattern preset, with an example name in the chosen Format.
+private struct NamingRow: View {
+    @Binding var options: DownloadOptions
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            SectionLabel("File names")
+            HStack(spacing: 10) {
+                Picker("Naming pattern", selection: $options.naming) {
+                    ForEach(NamingPattern.allCases, id: \.self) { Text($0.label) }
+                }
+                .labelsHidden()
+                .fixedSize()
+                Text("e.g. \(options.naming.example(format: options.format))")
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
         }
     }
 }

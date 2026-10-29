@@ -20,13 +20,17 @@ import Testing
         DownloadRequest(url: url, downloadFolder: fake.downloadFolder, options: .default)
     }
 
-    @Test func streamsVideoProgressAndFileEventsInOrder() async throws {
+    @Test func streamsVideoDetailsProgressAndFileEventsInOrder() async throws {
         let fake = try FakeYtDlp()
         let (events, exit) = try await collect(fake.runner(scenario: "success"), DownloadArguments.arguments(for: request(fake)))
 
-        let path = fake.downloadFolder.appendingPathComponent("Fake Video abc123.mp4").path
+        // yt-dlp only downloads; the Queue moves the file to its Naming pattern name.
+        let path = fake.downloadFolder.appendingPathComponent(".yt4s-incomplete/abc123.mp4").path
         #expect(events.first == .video(VideoInfo(id: "abc123", title: "Fake Video abc123", formatIDs: ["18"], partSizes: [10485760])))
-        #expect(events.count == 7)
+        #expect(events.dropFirst().first == .details(VideoDetails(
+            id: "abc123", title: "Fake Video abc123", channel: "Fake Channel", uploadDate: "20091025"
+        )))
+        #expect(events.count == 8)
         #expect(events.last == .file(videoID: "abc123", path: path))
         #expect(exit == YtDlpExit(termination: .exited(0), stderr: ""))
         #expect(FileManager.default.fileExists(atPath: path))

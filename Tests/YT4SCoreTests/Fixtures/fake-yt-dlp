@@ -5,6 +5,7 @@
 # Environment:
 #   YT4S_FAKE_SCENARIO       success (default) | video-failure | network-drop | network-drop-once | slow
 #                            | outdated | crash
+#                            | launch-crash (segfaults before doing anything, even --version: a damaged copy)
 #                            network-drop-once drops only on the first run (needs YT4S_FAKE_RUN_LOG)
 #   YT4S_FAKE_SCENARIO_FILE  if set and the file exists, its contents override YT4S_FAKE_SCENARIO
 #                            (lets a test change the outcome between two runs, e.g. for Retry)
@@ -54,6 +55,7 @@ if [[ $scenario == network-drop-once ]]; then
 fi
 
 case $scenario in
+  launch-crash) print -u2 'Fatal Python error: Segmentation fault'; kill -SEGV $$ ;;
   success|video-failure|network-drop|slow|outdated|crash) ;;
   *) print -u2 "fake yt-dlp: unknown YT4S_FAKE_SCENARIO '$scenario'"; exit 99 ;;
 esac

@@ -91,6 +91,8 @@ public enum YtDlpEvent: Equatable, Sendable {
     case file(videoID: String, path: String)
     /// One video listed for a Playlist or Channel source (see `YtDlpOutputTemplates.entry`).
     case entry(SourceEntry)
+    /// What naming needs about a video, before it downloads (see `YtDlpOutputTemplates.details`).
+    case details(VideoDetails)
 
     /// Parses a stdout line; `nil` for anything that is not one of YT4S's own lines.
     public init?(line: String) {
@@ -125,6 +127,9 @@ public enum YtDlpEvent: Equatable, Sendable {
         case "YT4S-ENTRY":
             guard let entry = SourceEntry(fields: fields) else { return nil }
             self = .entry(entry)
+        case "YT4S-DETAILS":
+            guard let details = VideoDetails(fields: fields) else { return nil }
+            self = .details(details)
         default:
             return nil
         }

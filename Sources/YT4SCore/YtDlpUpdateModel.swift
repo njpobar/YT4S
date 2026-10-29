@@ -2,7 +2,7 @@ import Foundation
 import Observation
 
 /// State and actions behind the footer's yt-dlp row: version, Update yt-dlp button with its badge,
-/// and the footer status / error text (ADR 0002).
+/// Roll back, the footer status / error text, and whether YT4S is damaged (ADR 0002).
 ///
 /// Checks the nightly channel at launch and then every `checkInterval` while the app is open; a
 /// found update only shows the badge. Nothing is installed until `update()` (the button click).
@@ -25,6 +25,12 @@ public final class YtDlpUpdateModel {
     /// A newer nightly found by the last check, not installed yet.
     public private(set) var available: YtDlpVersion?
     public private(set) var isUpdating = false
+    /// What Roll back would switch to (the previous download, or the bundled copy after the first
+    /// update); `nil` disables the button.
+    public private(set) var rollBackTarget: YtDlpCopy?
+    /// Set at launch when no yt-dlp copy starts, not even the bundled one: the window then shows
+    /// only "YT4S is damaged. Reinstall the app." with Update app.
+    public private(set) var isDamaged = false
     /// Outcome of the last click on Update yt-dlp.
     private var result: Message?
 
@@ -46,6 +52,7 @@ public final class YtDlpUpdateModel {
         let copy = updater.installations.current()
         self.current = copy
         self.selection = YtDlpSelection(copy)
+        self.rollBackTarget = updater.installations.rollBackTarget()
     }
 
     // MARK: What the footer shows
@@ -55,6 +62,8 @@ public final class YtDlpUpdateModel {
     public var showsBadge: Bool { available != nil }
 
     public var canUpdate: Bool { !isUpdating && !downloadsRunning() }
+
+    public var canRollBack: Bool { rollBackTarget != nil && !isUpdating && !downloadsRunning() }
 
     /// Why the button is disabled, for the footer status text (shared with Update app).
     public var hint: String? { downloadsRunning() && !isUpdating ? UpdateButtonHint.downloadsRunning : nil }
@@ -68,9 +77,15 @@ public final class YtDlpUpdateModel {
     // MARK: Actions
 
     /// At launch: uses the newer of the downloaded active and bundled copies, prunes downloaded
-    /// copies older than the bundled one, checks for an update, then keeps checking periodically.
+    /// copies older than the bundled one, falls back (active, previous, bundled) past copies that
+    /// do not start, checks for an update, then keeps checking periodically.
     public func launch() async {
         select((try? updater.installations.prepareAtLaunch()) ?? updater.installations.current())
+        if let copy = await updater.firstLaunchableCopy() {
+            select(copy)
+        } else {
+            isDamaged = true
+        }
         await check()
         periodicCheck?.cancel()
         let interval = checkInterval
@@ -113,6 +128,7 @@ public final class YtDlpUpdateModel {
                 available = nil
                 result = Message(text: "Updated to yt-dlp \(copy.version?.tag ?? "").", isError: false)
             case .upToDate(let copy):
+                select(copy) // the click may have ended a Roll back pin
                 available = nil
                 result = Message(text: "yt-dlp \(copy.version?.tag ?? "") is the latest.", isError: false)
             }
@@ -122,8 +138,25 @@ public final class YtDlpUpdateModel {
         }
     }
 
+    /// The Roll back button: switches to `rollBackTarget` offline and pins it until the next
+    /// Update yt-dlp click. Does nothing while a download runs or an update is in progress.
+    public func rollBack() {
+        guard canRollBack else { return }
+        do {
+            let copy = try updater.installations.rollBack()
+            select(copy)
+            available = nil
+            result = Message(text: "Rolled back to yt-dlp \(Self.tag(copy)). Update yt-dlp returns to the newest one.", isError: false)
+        } catch {
+            result = Message(text: "Couldn't roll back yt-dlp. You're still on yt-dlp \(Self.tag(current)).", isError: true)
+        }
+    }
+
+    private static func tag(_ copy: YtDlpCopy) -> String { copy.version?.tag ?? "(unknown version)" }
+
     private func select(_ copy: YtDlpCopy) {
         selection.select(copy)
         current = copy
+        rollBackTarget = updater.installations.rollBackTarget()
     }
 }

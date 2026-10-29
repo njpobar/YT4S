@@ -68,6 +68,15 @@ final class TestDefaults {
         #expect(suite.relaunch().options == DownloadOptions(format: .mp3, quality: .p720, naming: .title))
     }
 
+    @Test(arguments: [(NamingPattern.channelTitle, "channel-title"), (.dateTitle, "date-title")])
+    func namingPresetSurvivesRelaunchUnderAStableStoredValue(naming: NamingPattern, stored: String) {
+        let suite = TestDefaults()
+        suite.relaunch().options = DownloadOptions(format: .video, quality: .best, naming: naming)
+
+        #expect(suite.defaults.string(forKey: Settings.Key.naming) == stored)
+        #expect(suite.relaunch().options.naming == naming)
+    }
+
     @Test func unreadableValuesFallBackToDefaults() {
         let suite = TestDefaults()
         suite.defaults.set("hologram", forKey: Settings.Key.format)

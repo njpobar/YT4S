@@ -3,9 +3,11 @@ import os
 
 /// The `state.json` pointer next to the downloaded yt-dlp copies (ADR 0002).
 ///
-/// Tags name directories under the installations root. `nil` means "none downloaded".
-/// - `active`: the downloaded copy in use (when it is newer than the bundled one).
+/// Tags name directories under the installations root.
+/// - `active`: the downloaded copy in use; `nil` means the bundled copy is in use.
 /// - `previous`: the one downloaded copy kept for Roll back and the launch fallback chain.
+///   While a download is active and `previous` is `nil`, the bundled copy is what Roll back
+///   returns to, so a bad first update can be undone offline (#30).
 /// - `pinned`: set by Roll back so the update check does not re-offer the version rolled back
 ///   from; cleared when the user clicks Update yt-dlp again.
 public struct YtDlpState: Codable, Equatable, Sendable {
@@ -134,22 +136,51 @@ public struct YtDlpInstallations: Sendable {
     }
 
     /// Copies to try in order when one fails to launch: active, previous, bundled.
-    /// Downloaded copies that are missing or not newer than the bundled one are left out.
-    /// Always ends with the bundled copy.
+    /// Downloaded copies that are missing or not newer than the bundled one are left out, and each
+    /// copy appears once: after Roll back to the bundled copy the chain is bundled, then previous.
     public func fallbackChain() -> [YtDlpCopy] {
         let state = readState()
-        var chain = [state.active, state.previous].compactMap { tag in tag.flatMap(usableDownload) }
-        chain.append(YtDlpCopy(version: bundled.version, executable: bundled.executable, origin: .bundled))
+        var chain: [YtDlpCopy] = []
+        for copy in [copy(for: state.active), state.previous.flatMap(usableDownload), bundledCopy] {
+            if let copy, !chain.contains(copy) { chain.append(copy) }
+        }
         return chain
+    }
+
+    // MARK: Roll back
+
+    /// The copy Roll back would switch to: the previous download, else the bundled copy while a
+    /// download is active. `nil` when the bundled copy is in use or after Roll back (pinned) until
+    /// the next Update yt-dlp.
+    public func rollBackTarget() -> YtDlpCopy? {
+        let state = readState()
+        guard !state.pinned, let active = state.active.flatMap(usableDownload) else { return nil }
+        return state.previous.flatMap(usableDownload).flatMap { $0 == active ? nil : $0 } ?? bundledCopy
+    }
+
+    /// Swaps the pointer to `rollBackTarget()`, keeps the copy rolled back from as previous, and
+    /// pins it so the update check does not offer it again. Offline: only `state.json` changes.
+    @discardableResult
+    public func rollBack() throws -> YtDlpCopy {
+        guard let target = rollBackTarget() else { throw YtDlpRollBackError.nothingToRollBackTo }
+        let state = readState()
+        try writeState(YtDlpState(active: target.origin == .downloaded ? target.version?.tag : nil, previous: state.active, pinned: true))
+        return current()
     }
 
     /// Run once at launch: forgets downloads that are missing or older than the bundled copy,
     /// deletes them and any leftover staging or unreferenced directory, and returns `current()`.
+    /// A forgotten active copy is replaced by the previous one unless the user rolled back (then
+    /// the bundled copy stays in use); a pin whose rolled-back-from copy is gone is cleared.
     @discardableResult
     public func prepareAtLaunch() throws -> YtDlpCopy {
         var state = readState()
-        if let tag = state.active, !keepsDownload(tag) { state.active = nil }
+        if let tag = state.active, !keepsDownload(tag) {
+            state.active = state.pinned ? nil : state.previous.flatMap { keepsDownload($0) ? $0 : nil }
+            if !state.pinned { state.previous = nil }
+        }
         if let tag = state.previous, !keepsDownload(tag) { state.previous = nil }
+        if state.pinned, state.previous == nil { state.pinned = false }
         if FileManager.default.fileExists(atPath: root.path) {
             if state != readState() { try writeState(state) }
             try removeEverything(except: state)
@@ -189,6 +220,17 @@ public struct YtDlpInstallations: Sendable {
 
     // MARK: Helpers
 
+    private var bundledCopy: YtDlpCopy {
+        YtDlpCopy(version: bundled.version, executable: bundled.executable, origin: .bundled)
+    }
+
+    /// The copy a state slot points at: a usable download, or the bundled copy for `nil`.
+    /// `nil` for a download that is not usable.
+    private func copy(for tag: String?) -> YtDlpCopy? {
+        guard let tag else { return bundledCopy }
+        return usableDownload(tag)
+    }
+
     private func directory(for tag: String) -> URL {
         root.appendingPathComponent(tag, isDirectory: true)
     }
@@ -217,6 +259,11 @@ public struct YtDlpInstallations: Sendable {
             try FileManager.default.removeItem(at: root.appendingPathComponent(name))
         }
     }
+}
+
+public enum YtDlpRollBackError: Error, Equatable, Sendable {
+    /// Neither a previous download nor the bundled copy is older than the one in use.
+    case nothingToRollBackTo
 }
 
 /// The yt-dlp copy downloads run with right now, shared between the updater (which changes it
