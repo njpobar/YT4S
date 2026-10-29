@@ -48,6 +48,7 @@ public enum Subprocess {
 
         let stdoutData = PipeCollector(stdoutPipe.fileHandleForReading, onLine: onStdoutLine)
         let stderrData = PipeCollector(stderrPipe.fileHandleForReading)
+        let cancellation = GroupTermination()
 
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<SubprocessResult, Error>) in
@@ -57,6 +58,7 @@ public enum Subprocess {
                     case .exit: .exited(process.terminationStatus)
                     @unknown default: .exited(process.terminationStatus)
                     }
+                    cancellation.sweep()
                     continuation.resume(returning: SubprocessResult(
                         termination: termination,
                         stdout: String(decoding: stdoutData.finish(), as: UTF8.self),
@@ -68,27 +70,44 @@ public enum Subprocess {
                     // `onCancel` only terminates a running child: a cancel that landed before
                     // launch would otherwise let it run to completion. The flag is set before
                     // `onCancel` runs, so one of the two always sees it.
-                    if Task.isCancelled { terminateAll(process) }
+                    if Task.isCancelled { cancellation.terminate(process) }
                 } catch {
                     process.terminationHandler = nil
                     continuation.resume(throwing: error)
                 }
             }
         } onCancel: {
-            if process.isRunning { terminateAll(process) }
+            if process.isRunning { cancellation.terminate(process) }
         }
     }
+}
 
-    /// SIGTERMs the child's whole process group, not just the child: yt-dlp's helpers (ffmpeg)
-    /// would otherwise keep running and hold the output pipe open, so `run` (and Cancel) would
-    /// wait for them to finish. `Process` makes each child the leader of its own group.
-    private static func terminateAll(_ process: Process) {
+/// Cancel's SIGTERM, sent to the child's whole process group rather than just the child:
+/// yt-dlp's helpers (ffmpeg) would otherwise keep running and hold the output pipes open, so
+/// `run` (and Cancel) would wait for them to finish. `Process` makes each child the leader of
+/// its own group.
+///
+/// A helper being forked at the moment of the signal can escape it, so once the child itself has
+/// ended the group is signalled again. That is safe: a group ID is not reused while any process
+/// of the group is alive, and with none left the signal goes nowhere.
+private final class GroupTermination: @unchecked Sendable {
+    private let lock = NSLock()
+    private var groupLeader: pid_t?
+
+    func terminate(_ process: Process) {
         let pid = process.processIdentifier
-        if pid > 0, getpgid(pid) == pid {
-            kill(-pid, SIGTERM)
-        } else {
+        guard pid > 0, getpgid(pid) == pid else {
             process.terminate()
+            return
         }
+        lock.withLock { groupLeader = pid }
+        kill(-pid, SIGTERM)
+    }
+
+    /// Called once the child has exited: signals whatever is left of its group after a Cancel.
+    func sweep() {
+        guard let pid = lock.withLock({ groupLeader }) else { return }
+        kill(-pid, SIGTERM)
     }
 }
 
