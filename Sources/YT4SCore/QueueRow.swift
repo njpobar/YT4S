@@ -56,6 +56,9 @@ public struct QueueRow: Equatable, Sendable {
         case .cancelled:
             status = "Cancelled"
             actions = [.retry, .remove]
+        case .notStarted:
+            status = "Not started"
+            actions = [.retry, .remove]
         }
     }
 

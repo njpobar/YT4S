@@ -26,6 +26,8 @@ public enum QueueItemState: Equatable, Sendable {
     case failed(DownloadFailure)
     /// Stopped by the user before it finished; its partial files are gone.
     case cancelled
+    /// Never run: the batch stopped early after 3 Looks-outdated failures in a row (#11). Retry resumes it.
+    case notStarted
 }
 
 /// One video in the Queue.
@@ -55,7 +57,7 @@ public struct QueueItem: Identifiable, Equatable, Sendable {
     public var isRetryable: Bool {
         switch state {
         case .failed(let failure): failure.category.isRetryable
-        case .cancelled: true
+        case .cancelled, .notStarted: true
         case .pending, .running, .finished, .alreadyDownloaded: false
         }
     }
@@ -63,7 +65,7 @@ public struct QueueItem: Identifiable, Equatable, Sendable {
     public var isActive: Bool {
         switch state {
         case .pending, .running: true
-        case .finished, .alreadyDownloaded, .failed, .cancelled: false
+        case .finished, .alreadyDownloaded, .failed, .cancelled, .notStarted: false
         }
     }
 
@@ -71,7 +73,7 @@ public struct QueueItem: Identifiable, Equatable, Sendable {
     public var isDone: Bool {
         switch state {
         case .finished, .alreadyDownloaded: true
-        case .pending, .running, .failed, .cancelled: false
+        case .pending, .running, .failed, .cancelled, .notStarted: false
         }
     }
 }
@@ -102,6 +104,7 @@ public final class Queue {
     /// The items queued or retried since the Queue was last idle.
     @ObservationIgnored private var batch: Set<QueueItem.ID> = []
     @ObservationIgnored private var batchOutdatedFailures = 0
+    @ObservationIgnored private var consecutiveOutdatedFailures = 0
 
     /// - Parameter partialFilesFolder: where yt-dlp keeps unfinished files (`-P temp:`), one
     ///   subfolder per item, so they never show up in the Download folder and Cancel / Retry can
@@ -153,14 +156,22 @@ public final class Queue {
             update(id) { $0.state = .cancelled }
         case .running:
             if current?.id == id { current?.task.cancel() }
-        case .finished, .alreadyDownloaded, .failed, .cancelled:
+        case .finished, .alreadyDownloaded, .failed, .cancelled, .notStarted:
             break
         }
     }
 
-    /// Removes every finished and Already downloaded row. Files on disk are never touched.
+    /// Removes every finished and Already downloaded row, and dismisses the Looks-outdated banner.
+    /// Files on disk are never touched.
     public func clearFinished() {
         items.removeAll(where: \.isDone)
+        dismissOutdatedBanner()
+    }
+
+    /// The banner's X. It shows again only after new Looks-outdated failures.
+    public func dismissOutdatedBanner() {
+        showsOutdatedBanner = false
+        batchOutdatedFailures = 0
     }
 
     /// Removes one row that is not waiting or running. Files on disk are never touched.
@@ -179,9 +190,10 @@ public final class Queue {
         startWorkerIfNeeded()
     }
 
-    /// Retries every failed row that can succeed again ("Retry all failed"). Cancelled rows stay.
+    /// Retries every failed row that can succeed again ("Retry all failed"), and resumes the
+    /// rows an early stop left Not started. Cancelled rows stay.
     public func retryAllFailed() {
-        for item in items where item.isFailed && item.isRetryable {
+        for item in items where (item.isFailed && item.isRetryable) || item.state == .notStarted {
             retry(item.id)
         }
     }
@@ -286,16 +298,27 @@ public final class Queue {
         if worker == nil {
             batch = []
             batchOutdatedFailures = 0
+            consecutiveOutdatedFailures = 0
         }
         batch.insert(id)
     }
 
-    /// Applies the Looks-outdated banner rule (#11) to an item that just stopped running.
+    /// Applies the Looks-outdated rules (#11) to an item that just stopped running: the banner,
+    /// and the early stop after 3 in a row, which leaves every waiting video Not started.
     private func recordOutcome(_ id: QueueItem.ID) {
         guard case .failed(let failure) = items.first(where: { $0.id == id })?.state,
-              failure.category == .looksOutdated else { return }
+              failure.category == .looksOutdated else {
+            consecutiveOutdatedFailures = 0
+            return
+        }
         batchOutdatedFailures += 1
+        consecutiveOutdatedFailures += 1
         if batchOutdatedFailures >= 2 || batch.count == 1 { showsOutdatedBanner = true }
+        if consecutiveOutdatedFailures >= 3 {
+            for index in items.indices where items[index].state == .pending {
+                items[index].state = .notStarted
+            }
+        }
     }
 
     func partialFilesFolder(for id: QueueItem.ID) -> URL {

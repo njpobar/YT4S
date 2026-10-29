@@ -33,6 +33,12 @@ public final class YtDlpUpdateModel {
     public private(set) var isDamaged = false
     /// Outcome of the last click on Update yt-dlp.
     private var result: Message?
+    /// Update yt-dlp installed a newer copy since launch. Looks-outdated failures after that make
+    /// the banner mention Roll back too (#11).
+    public private(set) var hasAppliedUpdateThisSession = false
+    /// Called after Update yt-dlp or Roll back switched downloads to another copy; the Queue
+    /// dismisses its Looks-outdated banner here (`Queue.dismissesOutdatedBanner(whenSwitching:)`).
+    @ObservationIgnored public var onSwitched: (@MainActor () -> Void)?
 
     @ObservationIgnored private let updater: YtDlpUpdater
     @ObservationIgnored private let checkInterval: Duration
@@ -126,6 +132,8 @@ public final class YtDlpUpdateModel {
             case .installed(let copy):
                 select(copy)
                 available = nil
+                hasAppliedUpdateThisSession = true
+                onSwitched?()
                 result = Message(text: "Updated to yt-dlp \(copy.version?.tag ?? "").", isError: false)
             case .upToDate(let copy):
                 select(copy) // the click may have ended a Roll back pin
@@ -146,6 +154,7 @@ public final class YtDlpUpdateModel {
             let copy = try updater.installations.rollBack()
             select(copy)
             available = nil
+            onSwitched?()
             result = Message(text: "Rolled back to yt-dlp \(Self.tag(copy)). Update yt-dlp returns to the newest one.", isError: false)
         } catch {
             result = Message(text: "Couldn't roll back yt-dlp. You're still on yt-dlp \(Self.tag(current)).", isError: true)

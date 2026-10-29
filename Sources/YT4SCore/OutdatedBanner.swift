@@ -7,6 +7,16 @@ public enum OutdatedBanner {
     /// - Parameter updateAppliedThisSession: an Update yt-dlp installed a new copy since launch, so
     ///   failures that show the banner again came after it: Roll back is worth a try too.
     public static func text(updateAppliedThisSession: Bool) -> String {
-        "YouTube may have changed. Try Update yt-dlp below."
+        updateAppliedThisSession
+            ? "YouTube may have changed. Try Update yt-dlp below, or Roll back if the last update made things worse."
+            : "YouTube may have changed. Try Update yt-dlp below."
+    }
+}
+
+extension Queue {
+    /// Dismisses the banner whenever Update yt-dlp installs a new copy or Roll back switches copies:
+    /// the next downloads run with a different yt-dlp. Takes over `ytDlp.onSwitched`.
+    public func dismissesOutdatedBanner(whenSwitching ytDlp: YtDlpUpdateModel) {
+        ytDlp.onSwitched = { [weak self] in self?.dismissOutdatedBanner() }
     }
 }
