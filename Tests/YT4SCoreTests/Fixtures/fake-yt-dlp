@@ -1,0 +1,319 @@
+#!/bin/zsh
+# Fake yt-dlp for tests. Honors the subset of the real argv / output contract YT4S uses,
+# so the real runner can be pointed at it by injecting this path as the yt-dlp executable.
+#
+# Environment:
+#   YT4S_FAKE_SCENARIO       success (default) | video-failure | network-drop | slow | outdated | crash
+#   YT4S_FAKE_FAIL_IDS       video-failure: comma-separated video IDs that fail (default: every video)
+#   YT4S_FAKE_ERROR_MESSAGE  overrides the ERROR line text for failing scenarios ("<id>" is replaced)
+#   YT4S_FAKE_STEP_DELAY     seconds between progress steps (default 0, slow: 1)
+#   YT4S_FAKE_VERSION        printed by --version (default 2026.10.21)
+#   YT4S_FAKE_PLAYLIST_IDS   entries for playlist/channel URLs (default p1,p2,p3)
+#   YT4S_FAKE_ARGV_LOG       if set, argv is written there, each element NUL-terminated
+#
+# Contract notes (mirrors real yt-dlp):
+#   - --version prints the version and exits 0.
+#   - Unknown options fail with exit 2, like real yt-dlp's option parser.
+#   - --print [WHEN:]TEMPLATE prints at stage WHEN (default "video") and implies --quiet;
+#     it implies --simulate unless --no-simulate or a stage after "video" is used.
+#   - --progress-template [TYPE:]TEMPLATE (TYPE download by default) prints one stdout line per
+#     progress step, fields under progress.* and info.*.
+#   - Errors go to stderr as "ERROR: ..." and the process exits 1 if any video failed.
+# Fake-only guard: real downloads require --ignore-config, --no-update, --ffmpeg-location and
+# --js-runtimes (ADR 0002); missing any of them exits 2 so a regression in the app is caught.
+
+emulate -L zsh
+setopt extended_glob no_unset pipe_fail
+
+scenario=${YT4S_FAKE_SCENARIO:-success}
+step_delay=${YT4S_FAKE_STEP_DELAY:-0}
+[[ $scenario == slow && -z ${YT4S_FAKE_STEP_DELAY:-} ]] && step_delay=1
+
+if [[ -n ${YT4S_FAKE_ARGV_LOG:-} ]]; then
+  printf '%s\0' "$@" > "$YT4S_FAKE_ARGV_LOG"
+fi
+
+case $scenario in
+  success|video-failure|network-drop|slow|outdated|crash) ;;
+  *) print -u2 "fake yt-dlp: unknown YT4S_FAKE_SCENARIO '$scenario'"; exit 99 ;;
+esac
+
+usage_error() {
+  print -u2 "Usage: yt-dlp [OPTIONS] URL [URL...]"
+  print -u2
+  print -u2 "yt-dlp: error: $1"
+  exit 2
+}
+
+# ---- argv parsing ---------------------------------------------------------------------------
+
+typeset -a urls prints progress_templates
+typeset -A seen
+output_template='%(title)s [%(id)s].%(ext)s'
+home_path=$PWD
+temp_path=''
+simulate=default
+quiet=0
+extract_audio=0
+audio_format=''
+
+while (( $# )); do
+  arg=$1; shift
+  case $arg in
+    --version) print -r -- "${YT4S_FAKE_VERSION:-2026.10.21}"; exit 0 ;;
+    --ignore-config|--no-update|--newline|--no-progress|--progress|--no-warnings|--no-playlist|--yes-playlist \
+      |--embed-thumbnail|--embed-metadata|--no-embed-thumbnail|--no-embed-metadata|--force-overwrites|--no-overwrites \
+      |--no-part|--restrict-filenames|--windows-filenames|--no-mtime|--no-color|--ignore-errors|--abort-on-error \
+      |--no-abort-on-error|--flat-playlist|--no-flat-playlist|--no-cache-dir|--no-colors)
+      seen[$arg]=1 ;;
+    -q|--quiet) quiet=1 ;;
+    -s|--simulate) simulate=yes ;;
+    --no-simulate) simulate=no ;;
+    -x|--extract-audio) extract_audio=1 ;;
+    -J|--dump-single-json|-j|--dump-json) usage_error "fake yt-dlp does not implement $arg yet" ;;
+    --ffmpeg-location|--js-runtimes|-f|--format|-S|--format-sort|--merge-output-format|--remux-video \
+      |--audio-quality|--convert-thumbnails|--parse-metadata|--replace-in-metadata|--retries|--fragment-retries \
+      |--socket-timeout|--playlist-items|-I|--sleep-interval|--color|--trim-filenames|--postprocessor-args|--ppa)
+      (( $# )) || usage_error "$arg option requires an argument"
+      seen[$arg]=$1; shift ;;
+    --audio-format)
+      (( $# )) || usage_error "$arg option requires an argument"
+      audio_format=$1; shift ;;
+    -o|--output)
+      (( $# )) || usage_error "$arg option requires an argument"
+      output_template=$1; shift ;;
+    -P|--paths)
+      (( $# )) || usage_error "$arg option requires an argument"
+      case $1 in
+        home:*) home_path=${1#home:} ;;
+        temp:*) temp_path=${1#temp:} ;;
+        *) home_path=$1 ;;
+      esac
+      shift ;;
+    -O|--print)
+      (( $# )) || usage_error "$arg option requires an argument"
+      prints+=("$1"); shift ;;
+    --progress-template)
+      (( $# )) || usage_error "$arg option requires an argument"
+      progress_templates+=("$1"); shift ;;
+    --) urls+=("$@"); break ;;
+    -*) usage_error "no such option: $arg" ;;
+    *) urls+=("$arg") ;;
+  esac
+done
+
+for required in --ignore-config --no-update --ffmpeg-location --js-runtimes; do
+  [[ -n ${seen[$required]:-} ]] || usage_error "fake yt-dlp: missing required flag $required"
+done
+(( ${#urls} )) || usage_error "You must provide at least one URL."
+
+# ---- stages and simulate --------------------------------------------------------------------
+
+typeset -A stage_rank
+stage_rank=(pre_process 1 after_filter 2 video 3 before_dl 4 post_process 5 after_move 6 after_video 7 playlist 8)
+
+print_stage() {  # print_stage WHEN TEMPLATE
+  local spec=$1
+  if [[ $spec =~ '^([a-z_]+):(.*)$' && -n ${stage_rank[${match[1]}]:-} ]]; then
+    print -r -- "${match[1]}"$'\t'"${match[2]}"
+  else
+    print -r -- "video"$'\t'"$spec"
+  fi
+}
+
+typeset -a print_whens print_templates
+for p in "${prints[@]}"; do
+  parsed=$(print_stage "$p")
+  print_whens+=("${parsed%%$'\t'*}")
+  print_templates+=("${parsed#*$'\t'}")
+done
+
+if (( ${#prints} )); then
+  quiet=1
+  if [[ $simulate == default ]]; then
+    simulate=yes
+    for w in "${print_whens[@]}"; do (( stage_rank[$w] > stage_rank[video] )) && simulate=no; done
+  fi
+fi
+[[ $simulate == default ]] && simulate=no
+
+typeset -a download_templates
+for t in "${progress_templates[@]}"; do
+  if [[ $t =~ '^([a-z-]+):(.*)$' ]]; then
+    [[ ${match[1]} == download ]] && download_templates+=("${match[2]}")
+  else
+    download_templates+=("$t")
+  fi
+done
+
+# ---- template rendering ---------------------------------------------------------------------
+
+typeset -A info
+
+# render TEMPLATE: expands %(field)s, %(field)d, %(field)03d, %(field|default)s and %%.
+render() {
+  local template=$1 out='' key value fmt spec
+  while [[ $template =~ '%(%|\(([^)]*)\)([-#0+ ]*[0-9]*(\.[0-9]+)?)([sdfrj]))' ]]; do
+    out+=${template[1,MBEGIN-1]}
+    template=${template[MEND+1,-1]}
+    if [[ ${match[1]} == '%' ]]; then out+='%'; continue; fi
+    key=${match[2]}; fmt=${match[3]}; spec=${match[5]}
+    value=''
+    if [[ $key == *'|'* ]]; then
+      value=${info[${key%%|*}]:-${key#*|}}
+    else
+      value=${info[$key]:-NA}
+    fi
+    case $spec in
+      d) if [[ $value == <-> ]]; then out+=$(printf "%${fmt}d" "$value"); else out+=$value; fi ;;
+      f) out+=$(printf "%${fmt}f" "$value") ;;
+      *) out+=$(printf "%${fmt}s" "$value") ;;
+    esac
+  done
+  print -rn -- "$out$template"
+}
+
+emit_prints() {  # emit_prints WHEN
+  local i
+  for (( i = 1; i <= ${#print_whens}; i++ )); do
+    [[ ${print_whens[i]} == $1 ]] && print -r -- "$(render "${print_templates[i]}")"
+  done
+}
+
+say() { (( quiet )) || print -r -- "$@"; }
+
+progress() {  # progress PERCENT STATUS
+  local pct=$1 total=10485760
+  info[progress.status]=$2
+  info[progress.total_bytes]=$total
+  info[progress.downloaded_bytes]=$(( total * pct / 100 ))
+  info[progress._percent_str]=$(printf '%5.1f%%' "$pct")
+  info[progress._percent]=$pct
+  info[progress.speed]=1048576
+  info[progress._speed_str]='  1.00MiB/s'
+  info[progress.eta]=$(( (100 - pct) / 10 ))
+  info[progress._eta_str]=$(printf '00:%02d' $(( (100 - pct) / 10 )))
+  info[progress.filename]=${info[filepath]}
+  local t
+  for t in "${download_templates[@]}"; do print -r -- "$(render "$t")"; done
+  (( ${#download_templates} )) || say "[download] $(printf '%5.1f%%' "$pct") of   10.00MiB at    1.00MiB/s ETA 00:00"
+}
+
+# ---- per-video behavior ---------------------------------------------------------------------
+
+video_id_for() {
+  local url=$1
+  if [[ $url =~ '[?&]v=([A-Za-z0-9_-]+)' ]]; then print -r -- "${match[1]}"
+  elif [[ $url =~ 'youtu\.be/([A-Za-z0-9_-]+)' ]]; then print -r -- "${match[1]}"
+  elif [[ $url =~ '/shorts/([A-Za-z0-9_-]+)' ]]; then print -r -- "${match[1]}"
+  else print -r -- "${${url%%\?*}:t}"
+  fi
+}
+
+fails() {  # fails ID -> 0 if this video should fail under video-failure
+  [[ -z ${YT4S_FAKE_FAIL_IDS:-} ]] && return 0
+  [[ ",${YT4S_FAKE_FAIL_IDS}," == *",$1,"* ]]
+}
+
+error_line() {  # error_line ID DEFAULT
+  local message=${YT4S_FAKE_ERROR_MESSAGE:-$2}
+  print -u2 -r -- "ERROR: ${message//<id>/$1}"
+}
+
+any_failed=0
+
+process_video() {  # process_video ID [PLAYLIST_TITLE INDEX COUNT CHANNEL]
+  local id=$1
+  info=()
+  info[id]=$id
+  info[title]="Fake Video $id"
+  info[channel]=${5:-Fake Channel}
+  info[uploader]=${5:-Fake Channel}
+  info[upload_date]=20091025
+  info[duration]=212
+  info[extractor]=youtube
+  info[extractor_key]=Youtube
+  info[webpage_url]="https://www.youtube.com/watch?v=$id"
+  info[playlist_title]=${2:-NA}
+  info[playlist_index]=${3:-NA}
+  info[playlist_count]=${4:-NA}
+  if (( extract_audio )); then info[ext]=${audio_format:-mp3}; else info[ext]=mp4; fi
+
+  local relative=$(render "$output_template")
+  local filepath
+  if [[ $relative == /* ]]; then filepath=$relative; else filepath=$home_path/$relative; fi
+  info[filepath]=$filepath
+  info[filename]=$filepath
+  info[_filename]=$filepath
+  for k in ${(k)info}; do info[info.$k]=${info[$k]}; done
+
+  say "[youtube] Extracting URL: ${info[webpage_url]}"
+  say "[youtube] $id: Downloading webpage"
+
+  if [[ $scenario == outdated ]]; then
+    print -u2 -r -- "WARNING: [youtube] $id: nsig extraction failed: Some formats may be missing"
+    error_line $id "[youtube] <id>: Unable to extract player response; please report this issue on  https://github.com/yt-dlp/yt-dlp/issues?q= , filling out the appropriate issue template. Confirm you are on the latest version using  yt-dlp -U"
+    any_failed=1; return
+  fi
+  if [[ $scenario == video-failure ]] && fails $id; then
+    error_line $id "[youtube] <id>: Video unavailable. This video has been removed by the uploader"
+    any_failed=1; return
+  fi
+
+  emit_prints pre_process
+  emit_prints after_filter
+  emit_prints video
+  [[ $simulate == yes ]] && return
+
+  emit_prints before_dl
+  say "[info] $id: Downloading 1 format(s): 137+140"
+  say "[download] Destination: $filepath"
+  mkdir -p -- "${filepath:h}"
+
+  local pct
+  for pct in 0 25 50 75 100; do
+    if [[ $scenario == network-drop && $pct -gt 50 ]]; then
+      print -n -- "partial $id" > "$filepath.part"
+      error_line $id "[download] Got error: HTTPSConnectionPool(host='rr1---sn-fake.googlevideo.com', port=443): Read timed out. (read timeout=20.0)"
+      any_failed=1; return
+    fi
+    if [[ $scenario == crash && $pct -gt 25 ]]; then
+      print -n -- "partial $id" > "$filepath.part"
+      print -u2 'Traceback (most recent call last):'
+      print -u2 '  File "yt_dlp/__main__.py", line 17, in <module>'
+      print -u2 'Fatal Python error: Segmentation fault'
+      kill -SEGV $$
+    fi
+    if (( pct == 100 )); then progress $pct finished; else progress $pct downloading; fi
+    (( pct < 100 )) && [[ $step_delay != 0 ]] && sleep $step_delay
+  done
+
+  print -r -- "fake media $id ${info[ext]}" > "$filepath"
+  emit_prints post_process
+  emit_prints after_move
+  emit_prints after_video
+}
+
+is_collection() {
+  [[ $1 == *list=* || $1 == */playlist* || $1 == */@* || $1 == */channel/* || $1 == */c/* || $1 == */user/* ]]
+}
+
+for url in "${urls[@]}"; do
+  if is_collection "$url"; then
+    entries=("${(@s:,:)${YT4S_FAKE_PLAYLIST_IDS:-p1,p2,p3}}")
+    if [[ $url =~ '[?&]list=([A-Za-z0-9_-]+)' ]]; then name=${match[1]}; else name=${${url%%\?*}:t}; name=${name#@}; fi
+    title="Fake Playlist $name"
+    channel="Fake Channel"
+    [[ $url == */@* ]] && { title="Fake Channel $name"; channel="Fake Channel $name"; }
+    say "[youtube:tab] Extracting URL: $url"
+    say "[download] Downloading playlist: $title"
+    for (( i = 1; i <= ${#entries}; i++ )); do
+      say "[download] Downloading item $i of ${#entries}"
+      process_video "${entries[i]}" "$title" $i ${#entries} "$channel"
+    done
+  else
+    process_video "$(video_id_for "$url")"
+  fi
+done
+
+exit $any_failed

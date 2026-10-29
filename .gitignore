@@ -1,13 +1,16 @@
-# Python-generated files
-__pycache__/
-*.py[oc]
-build/
-dist/
-wheels/
-*.egg-info
+# SwiftPM
+.build/
+.swiftpm/
+Package.resolved.orig
 
-# Virtual environments
-.venv
+# Pinned third-party binaries fetched by scripts/fetch-deps.sh (see deps.lock)
+vendor/
+
+# scripts/build-app.sh output
+build/
+
+# macOS
+.DS_Store
 
 # Claude Code agent worktrees
 .claude/worktrees/
