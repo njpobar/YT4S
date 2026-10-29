@@ -5,7 +5,7 @@
 #
 #   1. Preflight: semver newer than the last release, clean tree on main, in sync with origin.
 #   2. Gates: swift test, live contract test (#32), build + sign + post-signing smoke gate.
-#   3. Package: dist/YT4S-<version>.zip, EdDSA signature + appcast.xml (#29), dist/YT4S-<version>.dmg.
+#   3. Package: dist/YT4S-<version>.zip, its EdDSA-signed dist/appcast.xml, dist/YT4S-<version>.dmg.
 #   4. Manual checklist: Nick confirms by typing the version.
 #   5. Publish: commit the VERSION bump (if any), tag v<version>, push main + tag atomically,
 #      gh release create --draft with the assets.
@@ -14,6 +14,7 @@
 set -euo pipefail
 source "$(dirname "$0")/lib/deps.sh"
 source "$(dirname "$0")/lib/version.sh"
+source "$(dirname "$0")/lib/sparkle.sh"
 
 APP="$REPO_ROOT/build/YT4S.app"
 DIST_DIR="$REPO_ROOT/dist"
@@ -67,6 +68,18 @@ fi
 $dry_run || gh auth status > /dev/null 2>&1 || die "gh is not signed in; run: gh auth login"
 echo "    YT4S $version, build $build, previous release ${previous:-none}"
 
+# The zip must be signed by the private half of the key the app trusts, or every installed copy
+# rejects the update. Checked before the slow gates.
+step "Sparkle signing key"
+public_key=$(sparkle_public_key)
+[ -n "$public_key" ] || die "config/sparkle-public-key is empty; do the one-time setup in README.md (Signing key for app updates)"
+[ -x "$(sparkle_bin)/generate_keys" ] || swift package --package-path "$REPO_ROOT" resolve
+keychain_key=$("$(sparkle_bin)/generate_keys" -p 2> /dev/null) \
+  || die "no Sparkle signing key in your login Keychain; do the one-time setup in README.md (Signing key for app updates)"
+[ "$keychain_key" = "$public_key" ] \
+  || die "the Sparkle key in your login Keychain ($keychain_key) does not match config/sparkle-public-key ($public_key)"
+echo "    login Keychain key matches config/sparkle-public-key"
+
 # ---- 2. Gates --------------------------------------------------------------------------------
 
 step "Gate: swift test"
@@ -100,13 +113,12 @@ step "Zipping $(basename "$zip")"
 ditto -c -k --sequesterRsrc --keepParent "$APP" "$zip"
 assets=("$zip")
 
-# Hook for #29: EdDSA-sign "$zip" with Sparkle's sign_update (key in Nick's login Keychain),
-# write a single-entry "$DIST_DIR/appcast.xml" (no deltas) and append it to assets.
-sign_update_and_write_appcast() {
-  echo "    SKIPPED: EdDSA signature and appcast.xml are not implemented yet (#29)"
-}
-step "Sparkle signature and appcast"
-sign_update_and_write_appcast
+# EdDSA-signed with the login Keychain key; the app reads the feed at
+# releases/latest/download/appcast.xml, so it sees this entry only once the draft is published.
+step "Sparkle signature and appcast.xml"
+"$REPO_ROOT/scripts/write-appcast.sh" "$zip" "$version" "$build" \
+  "https://github.com/njpobar/YT4S/releases/download/$tag/$(basename "$zip")" "$DIST_DIR/appcast.xml"
+assets+=("$DIST_DIR/appcast.xml")
 
 step "Making $(basename "$dmg")"
 "$REPO_ROOT/scripts/make-dmg.sh" "$APP" "$dmg" "YT4S $version"
