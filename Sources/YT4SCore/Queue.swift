@@ -106,7 +106,7 @@ public final class Queue {
                         self.update(id) { $0.title = info.title; $0.videoID = info.id }
                     case .file(_, let path):
                         file = URL(fileURLWithPath: path)
-                    case .progress:
+                    case .progress, .entry:
                         break
                     }
                     self.update(id) { $0.state = .running(progress) }
