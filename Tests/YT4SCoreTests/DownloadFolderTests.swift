@@ -23,6 +23,15 @@ import Testing
         return file
     }
 
+    @discardableResult
+    func placed(_ downloaded: URL, plan: NamePlan, videoID: String, format: Format? = nil, downloadAgain: Bool = false) throws -> URL {
+        let video = SavedVideo(videoID: videoID, format: format ?? (downloaded.pathExtension == "mp3" ? .mp3 : .video))
+        guard case .placed(let file) = try folder.place(downloaded, plan: plan, video: video, downloadAgain: downloadAgain) else {
+            throw CocoaError(.fileWriteFileExists)
+        }
+        return file
+    }
+
     func contents(_ relativePath: String) throws -> String {
         try String(contentsOf: root.appendingPathComponent(relativePath), encoding: .utf8)
     }
@@ -30,25 +39,25 @@ import Testing
     let rickPlan = NamePlan(folders: ["Rick Astley"], stem: "Never Gonna Give You Up")
 
     @Test func movesTheDownloadToItsNameCreatingFoldersAndRemovingTheIncompleteFolder() throws {
-        let placed = try folder.place(try downloaded("dQw4w9WgXcQ"), plan: rickPlan, videoID: "dQw4w9WgXcQ")
+        let file = try placed(try downloaded("dQw4w9WgXcQ"), plan: rickPlan, videoID: "dQw4w9WgXcQ")
 
-        #expect(placed == root.appendingPathComponent("Rick Astley/Never Gonna Give You Up.mp4"))
+        #expect(file == root.appendingPathComponent("Rick Astley/Never Gonna Give You Up.mp4"))
         #expect(try contents("Rick Astley/Never Gonna Give You Up.mp4") == "media dQw4w9WgXcQ")
         #expect(!FileManager.default.fileExists(atPath: folder.incompleteFolder.path))
-        #expect(folder.videoID(ofFileAt: placed) == "dQw4w9WgXcQ")
+        #expect(folder.savedVideo(ofFileAt: file) == SavedVideo(videoID: "dQw4w9WgXcQ", format: .video))
     }
 
     @Test func predictsTheSameFileBeforeDownloading() throws {
-        #expect(folder.plannedFile(rickPlan, videoID: "dQw4w9WgXcQ", fileExtension: "mp4")
+        #expect(folder.plannedFile(rickPlan, video: SavedVideo(videoID: "dQw4w9WgXcQ", format: .video), fileExtension: "mp4")
             == root.appendingPathComponent("Rick Astley/Never Gonna Give You Up.mp4"))
     }
 
     @Test func aDifferentVideoWithTheSameTitleGetsItsIDAndBothFilesStay() throws {
-        try folder.place(try downloaded("aaaaaaaaaaa"), plan: rickPlan, videoID: "aaaaaaaaaaa")
-        #expect(folder.plannedFile(rickPlan, videoID: "bbbbbbbbbbb", fileExtension: "mp4")
+        try placed(try downloaded("aaaaaaaaaaa"), plan: rickPlan, videoID: "aaaaaaaaaaa")
+        #expect(folder.plannedFile(rickPlan, video: SavedVideo(videoID: "bbbbbbbbbbb", format: .video), fileExtension: "mp4")
             == root.appendingPathComponent("Rick Astley/Never Gonna Give You Up [bbbbbbbbbbb].mp4"))
 
-        let second = try folder.place(try downloaded("bbbbbbbbbbb"), plan: rickPlan, videoID: "bbbbbbbbbbb")
+        let second = try placed(try downloaded("bbbbbbbbbbb"), plan: rickPlan, videoID: "bbbbbbbbbbb")
 
         #expect(second.lastPathComponent == "Never Gonna Give You Up [bbbbbbbbbbb].mp4")
         #expect(try contents("Rick Astley/Never Gonna Give You Up.mp4") == "media aaaaaaaaaaa")
@@ -59,23 +68,37 @@ import Testing
         try FileManager.default.createDirectory(at: root.appendingPathComponent("Rick Astley"), withIntermediateDirectories: true)
         try "mine".write(to: root.appendingPathComponent("Rick Astley/Never Gonna Give You Up.mp4"), atomically: true, encoding: .utf8)
 
-        let placed = try folder.place(try downloaded("dQw4w9WgXcQ"), plan: rickPlan, videoID: "dQw4w9WgXcQ")
+        let file = try placed(try downloaded("dQw4w9WgXcQ"), plan: rickPlan, videoID: "dQw4w9WgXcQ")
 
-        #expect(placed.lastPathComponent == "Never Gonna Give You Up [dQw4w9WgXcQ].mp4")
+        #expect(file.lastPathComponent == "Never Gonna Give You Up [dQw4w9WgXcQ].mp4")
         #expect(try contents("Rick Astley/Never Gonna Give You Up.mp4") == "mine")
     }
 
-    @Test func downloadingTheSameVideoAgainReplacesItsFile() throws {
-        try folder.place(try downloaded("dQw4w9WgXcQ", contents: "old"), plan: rickPlan, videoID: "dQw4w9WgXcQ")
-        let again = try folder.place(try downloaded("dQw4w9WgXcQ", contents: "new"), plan: rickPlan, videoID: "dQw4w9WgXcQ")
+    @Test func theSameVideoFoundAtItsNameIsAlreadyThereAndNothingIsOverwritten() throws {
+        let first = try placed(try downloaded("dQw4w9WgXcQ", contents: "old"), plan: rickPlan, videoID: "dQw4w9WgXcQ")
+        let second = try downloaded("dQw4w9WgXcQ", contents: "new")
 
-        #expect(again.lastPathComponent == "Never Gonna Give You Up.mp4")
-        #expect(try contents("Rick Astley/Never Gonna Give You Up.mp4") == "new")
-        #expect(folder.videoID(ofFileAt: again) == "dQw4w9WgXcQ")
+        let placement = try folder.place(second, plan: rickPlan, video: SavedVideo(videoID: "dQw4w9WgXcQ", format: .video))
+
+        #expect(placement == .alreadyThere(first))
+        #expect(try contents("Rick Astley/Never Gonna Give You Up.mp4") == "old")
+    }
+
+    @Test func downloadAgainWritesASecondFileUnderTheCollisionRule() throws {
+        try placed(try downloaded("dQw4w9WgXcQ", contents: "old"), plan: rickPlan, videoID: "dQw4w9WgXcQ")
+        let again = try placed(try downloaded("dQw4w9WgXcQ", contents: "new"), plan: rickPlan, videoID: "dQw4w9WgXcQ", downloadAgain: true)
+        let third = try placed(try downloaded("dQw4w9WgXcQ", contents: "newer"), plan: rickPlan, videoID: "dQw4w9WgXcQ", downloadAgain: true)
+
+        #expect(again.lastPathComponent == "Never Gonna Give You Up [dQw4w9WgXcQ].mp4")
+        #expect(third.lastPathComponent == "Never Gonna Give You Up [dQw4w9WgXcQ] 2.mp4")
+        #expect(try contents("Rick Astley/Never Gonna Give You Up.mp4") == "old")
+        #expect(try contents("Rick Astley/Never Gonna Give You Up [dQw4w9WgXcQ].mp4") == "new")
+        #expect(try contents("Rick Astley/Never Gonna Give You Up [dQw4w9WgXcQ] 2.mp4") == "newer")
+        #expect(folder.savedVideo(ofFileAt: again) == SavedVideo(videoID: "dQw4w9WgXcQ", format: .video))
     }
 
     @Test func aDownloadThatWillNotBePlacedIsDiscardedButNothingOutsideTheIncompleteFolder() throws {
-        let saved = try folder.place(try downloaded("aaaaaaaaaaa"), plan: rickPlan, videoID: "aaaaaaaaaaa")
+        let saved = try placed(try downloaded("aaaaaaaaaaa"), plan: rickPlan, videoID: "aaaaaaaaaaa")
         let unplaced = try downloaded("bbbbbbbbbbb")
 
         folder.discardIncomplete(saved)
@@ -86,8 +109,8 @@ import Testing
     }
 
     @Test func videoAndMP3OfOneVideoShareTheFolder() throws {
-        try folder.place(try downloaded("dQw4w9WgXcQ", ext: "mp4"), plan: rickPlan, videoID: "dQw4w9WgXcQ")
-        let mp3 = try folder.place(try downloaded("dQw4w9WgXcQ", ext: "mp3"), plan: rickPlan, videoID: "dQw4w9WgXcQ")
+        try placed(try downloaded("dQw4w9WgXcQ", ext: "mp4"), plan: rickPlan, videoID: "dQw4w9WgXcQ")
+        let mp3 = try placed(try downloaded("dQw4w9WgXcQ", ext: "mp3"), plan: rickPlan, videoID: "dQw4w9WgXcQ")
 
         #expect(mp3 == root.appendingPathComponent("Rick Astley/Never Gonna Give You Up.mp3"))
         #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("Rick Astley/Never Gonna Give You Up.mp4").path))

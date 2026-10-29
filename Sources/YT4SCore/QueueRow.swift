@@ -11,6 +11,7 @@ public struct QueueRow: Equatable, Sendable {
         case cancel
         case retry
         case remove
+        case downloadAgain
         case showInFinder(URL)
     }
 
@@ -52,9 +53,12 @@ public struct QueueRow: Equatable, Sendable {
         case .alreadyDownloaded(let file):
             status = "Already downloaded"
             tone = .skipped
-            actions = [.showInFinder(file)]
+            actions = [.downloadAgain, .showInFinder(file)]
         case .cancelled:
             status = "Cancelled"
+            actions = [.retry, .remove]
+        case .notStarted:
+            status = "Not started"
             actions = [.retry, .remove]
         }
     }
