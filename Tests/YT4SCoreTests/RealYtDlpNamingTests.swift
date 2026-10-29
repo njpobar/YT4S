@@ -86,4 +86,21 @@ struct RealYtDlpNamingTests {
         #expect(files(in: folder) == ["Me at the zoo [jNQXAC9IVRw].mp3", "Me at the zoo.mp3"])
         #expect(try String(contentsOf: existing, encoding: .utf8) == "not this video")
     }
+
+    @Test func aCustomTemplateWithPlaylistFieldsAndADateFolder() async throws {
+        let (folder, items) = try await download(
+            "https://www.youtube.com/playlist?list=PLlaN88a7y2_qHDbY9eQbuNTAuEJUSEeuu",
+            DownloadOptions(
+                format: .mp3, quality: .best, naming: .custom,
+                customTemplate: "%(playlist_title)s/%(upload_date>%Y)s/%(playlist_index)03d of %(playlist_count)s: %(id)s.%(ext)s"
+            )
+        )
+
+        #expect(items.count == 3)
+        #expect(items.allSatisfy { $0.isFinished })
+        let names = files(in: folder)
+        #expect(names.count == 3)
+        #expect(names.allSatisfy { $0.hasPrefix("Rick Astley Live at The O2/20") && $0.hasSuffix(".mp3") })
+        #expect(names.map { ($0 as NSString).lastPathComponent.prefix(11) } == ["001 of 3 - ", "002 of 3 - ", "003 of 3 - "])
+    }
 }
