@@ -42,10 +42,21 @@ public enum QualityPreset: String, Codable, Sendable, CaseIterable {
     }
 }
 
-/// The rule that turns a video's details into its file name and folder.
-/// Channel - Title, Date - Title and Custom arrive with the Naming pattern ticket.
+/// The rule that turns a video's details into its file name and folder (see `NamePlan`).
+/// Raw values are persisted by `Settings`: do not rename them.
 public enum NamingPattern: String, Codable, Sendable, CaseIterable {
     case title
+    case channelTitle = "channel-title"
+    case dateTitle = "date-title"
+
+    /// What the Naming pattern control shows.
+    public var label: String {
+        switch self {
+        case .title: "Title"
+        case .channelTitle: "Channel - Title"
+        case .dateTitle: "Date - Title"
+        }
+    }
 }
 
 /// The choices a Queue item is downloaded with. Each item keeps its own copy so Retry reuses them.
@@ -132,7 +143,7 @@ public enum DownloadArguments {
 
     static func outputTemplate(_ naming: NamingPattern) -> String {
         switch naming {
-        case .title: "%(title)s.%(ext)s"
+        case .title, .channelTitle, .dateTitle: "%(title)s.%(ext)s"
         }
     }
 }
