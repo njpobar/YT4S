@@ -39,11 +39,14 @@ public struct DownloadRequest: Equatable, Sendable {
     public var url: String
     public var downloadFolder: URL
     public var options: DownloadOptions
+    /// The Source the video came from (channel name, playlist title and index), for naming.
+    public var origin: VideoOrigin
 
-    public init(url: String, downloadFolder: URL, options: DownloadOptions) {
+    public init(url: String, downloadFolder: URL, options: DownloadOptions, origin: VideoOrigin = .link) {
         self.url = url
         self.downloadFolder = downloadFolder
         self.options = options
+        self.origin = origin
     }
 }
 

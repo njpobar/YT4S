@@ -22,19 +22,22 @@ import Testing
         model.pasteText = "  \n "
         #expect(!model.canDownload)
 
-        model.pasteText = "https://youtu.be/abc123"
+        model.pasteText = "https://youtu.be/dQw4w9WgXcQ"
         #expect(model.canDownload)
     }
 
     @Test func downloadQueuesThePastedLinkWithDefaultOptionsAndClearsThePasteBox() throws {
         let fake = try FakeYtDlp()
         let model = model(fake)
-        model.pasteText = "  https://youtu.be/abc123 \n"
+        model.pasteText = "  https://youtu.be/dQw4w9WgXcQ \n"
 
         model.download()
 
         #expect(model.queue.items.map(\.request) == [
-            DownloadRequest(url: "https://youtu.be/abc123", downloadFolder: fake.downloadFolder, options: .default),
+            DownloadRequest(
+                url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ", downloadFolder: fake.downloadFolder, options: .default,
+                origin: VideoOrigin(sourceKind: .video, videoID: "dQw4w9WgXcQ")
+            ),
         ])
         #expect(model.pasteText == "")
     }
@@ -43,25 +46,25 @@ import Testing
         let fake = try FakeYtDlp()
         let folder = fake.downloadFolder.appendingPathComponent("YT4S", isDirectory: true)
         let model = model(fake, folder: folder)
-        model.pasteText = "https://youtu.be/abc123"
+        model.pasteText = "https://youtu.be/dQw4w9WgXcQ"
 
         model.download()
         await model.queue.waitUntilIdle()
 
         #expect(FileManager.default.fileExists(atPath: folder.path))
-        #expect(model.queue.items.first?.state == .finished(file: folder.appendingPathComponent("Fake Video abc123.mp4")))
+        #expect(model.queue.items.first?.state == .finished(file: folder.appendingPathComponent("Fake Video dQw4w9WgXcQ.mp4")))
         #expect(model.errorMessage == nil)
     }
 
     @Test func anUncreatableFolderShowsAPlainErrorAndQueuesNothing() throws {
         let fake = try FakeYtDlp()
         let model = model(fake, folder: URL(fileURLWithPath: "/nonexistent-yt4s-parent/YT4S", isDirectory: true))
-        model.pasteText = "https://youtu.be/abc123"
+        model.pasteText = "https://youtu.be/dQw4w9WgXcQ"
 
         model.download()
 
         #expect(model.queue.items.isEmpty)
         #expect(model.errorMessage == "Couldn't create the folder /nonexistent-yt4s-parent/YT4S. Choose another Download folder.")
-        #expect(model.pasteText == "https://youtu.be/abc123")
+        #expect(model.pasteText == "https://youtu.be/dQw4w9WgXcQ")
     }
 }

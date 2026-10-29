@@ -54,7 +54,8 @@ public struct QueueItem: Identifiable, Equatable, Sendable {
 public final class Queue {
     public private(set) var items: [QueueItem] = []
 
-    @ObservationIgnored private let runner: YtDlpRunner
+    /// Also lists Playlist and Channel sources, so both use the same yt-dlp.
+    @ObservationIgnored let runner: YtDlpRunner
     @ObservationIgnored private var worker: Task<Void, Never>?
 
     public init(runner: YtDlpRunner) {
@@ -64,7 +65,7 @@ public final class Queue {
     /// Appends a pending item and starts it when its turn comes.
     @discardableResult
     public func add(_ request: DownloadRequest) -> QueueItem.ID {
-        let item = QueueItem(request: request)
+        let item = QueueItem(request: request, title: request.origin.title, videoID: request.origin.videoID)
         items.append(item)
         startWorkerIfNeeded()
         return item.id
