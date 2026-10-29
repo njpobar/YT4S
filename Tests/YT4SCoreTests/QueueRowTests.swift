@@ -1,0 +1,55 @@
+import Foundation
+import Testing
+@testable import YT4SCore
+
+/// The text a Queue row shows for each state.
+@Suite struct QueueRowTests {
+    private let request = DownloadRequest(
+        url: "https://youtu.be/jNQXAC9IVRw",
+        downloadFolder: URL(fileURLWithPath: "/tmp/YT4S", isDirectory: true),
+        options: .default
+    )
+
+    private func progress(fraction: Double, speed: Double, eta: Int) -> DownloadProgress {
+        var progress = DownloadProgress()
+        progress.apply(.progress(PartProgress(
+            videoID: "x", formatID: "18", status: .downloading,
+            downloadedBytes: Int64(fraction * 1000), totalBytes: 1000, totalBytesEstimate: nil,
+            speed: speed, eta: eta, fragmentIndex: nil, fragmentCount: nil
+        )))
+        return progress
+    }
+
+    @Test func showsTheLinkUntilTheTitleIsKnown() {
+        #expect(QueueRow(QueueItem(request: request)).title == "https://youtu.be/jNQXAC9IVRw")
+        #expect(QueueRow(QueueItem(request: request, title: "Me at the zoo")).title == "Me at the zoo")
+    }
+
+    @Test func statusPerState() {
+        let file = URL(fileURLWithPath: "/tmp/YT4S/Me at the zoo.mp4")
+        #expect(QueueRow(QueueItem(request: request)).status == "Waiting")
+        #expect(QueueRow(QueueItem(request: request, state: .running(DownloadProgress()))).status == "Starting...")
+        #expect(QueueRow(QueueItem(request: request, state: .finished(file: file))).status == "Done")
+        #expect(QueueRow(QueueItem(request: request, state: .failed(DownloadFailure(termination: .exited(1), details: "ERROR: x")))).status
+            == "Couldn't download this video.")
+    }
+
+    @Test func runningStatusShowsPercentSpeedAndTimeLeft() {
+        let row = QueueRow(QueueItem(request: request, state: .running(progress(fraction: 0.4, speed: 3_200_000, eta: 5))))
+
+        #expect(row.status == "40% - 3.2 MB/s - 5s left")
+        #expect(row.fraction == 0.4)
+    }
+
+    @Test func slowSpeedsAndLongWaitsReadNaturally() {
+        let row = QueueRow(QueueItem(request: request, state: .running(progress(fraction: 0.07, speed: 850_000, eta: 125))))
+
+        #expect(row.status == "7% - 850 KB/s - 2m 5s left")
+    }
+
+    @Test func onlyRunningRowsHaveAProgressBar() {
+        #expect(QueueRow(QueueItem(request: request)).fraction == nil)
+        #expect(QueueRow(QueueItem(request: request, state: .running(DownloadProgress()))).showsProgress)
+        #expect(!QueueRow(QueueItem(request: request)).showsProgress)
+    }
+}

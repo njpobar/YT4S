@@ -27,10 +27,13 @@ public struct SubprocessResult: Sendable {
 ///
 /// Cancelling the calling task sends SIGTERM to the child.
 public enum Subprocess {
+    /// - Parameter onStdoutLine: called on a background thread with each complete stdout line
+    ///   (without the newline) as soon as it is written, in order, all before `run` returns.
     public static func run(
         executable: URL,
         arguments: [String],
-        environment: [String: String]? = nil
+        environment: [String: String]? = nil,
+        onStdoutLine: (@Sendable (String) -> Void)? = nil
     ) async throws -> SubprocessResult {
         let process = Process()
         process.executableURL = executable
@@ -43,7 +46,7 @@ public enum Subprocess {
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
 
-        let stdoutData = PipeCollector(stdoutPipe.fileHandleForReading)
+        let stdoutData = PipeCollector(stdoutPipe.fileHandleForReading, onLine: onStdoutLine)
         let stderrData = PipeCollector(stderrPipe.fileHandleForReading)
 
         return try await withTaskCancellationHandler {
@@ -73,14 +76,28 @@ public enum Subprocess {
     }
 }
 
-/// Drains a pipe on a background thread so a chatty child never blocks on a full pipe buffer.
+/// Drains a pipe on a background thread so a chatty child never blocks on a full pipe buffer,
+/// optionally reporting each complete line as it arrives.
 private final class PipeCollector: @unchecked Sendable {
     private let done = DispatchSemaphore(value: 0)
     private var data = Data()
 
-    init(_ handle: FileHandle) {
+    init(_ handle: FileHandle, onLine: (@Sendable (String) -> Void)? = nil) {
         Thread.detachNewThread { [self] in
-            data = handle.readDataToEndOfFile()
+            var lineStart = 0
+            while true {
+                let chunk = handle.availableData
+                if chunk.isEmpty { break }
+                data.append(chunk)
+                guard let onLine else { continue }
+                while let newline = data[lineStart...].firstIndex(of: UInt8(ascii: "\n")) {
+                    onLine(String(decoding: data[lineStart..<newline], as: UTF8.self))
+                    lineStart = newline + 1
+                }
+            }
+            if let onLine, lineStart < data.count {
+                onLine(String(decoding: data[lineStart...], as: UTF8.self))
+            }
             done.signal()
         }
     }

@@ -20,10 +20,17 @@ struct YT4SApp: App {
         }
     }
 
+    // Created once with the App. Not @State: on the macOS 27 SDK @State is a SwiftUI macro whose
+    // plugin ships only with Xcode, and this project builds with Command Line Tools.
+    private let model = MainWindowModel(
+        queue: Queue(runner: YtDlpRunner(tools: BundledTools(resourcesDirectory: Bundle.main.resourceURL!))),
+        settings: Settings(defaults: .standard)
+    )
+
     var body: some Scene {
         Window("YT4S", id: "main") {
             if let appUpdate {
-                MainWindow()
+                MainWindow(model: model)
                     // Placeholder until the footer row (Update yt-dlp, Roll back, Update app) lands.
                     .safeAreaInset(edge: .bottom, alignment: .leading) {
                         UpdateAppButton(model: appUpdate).padding(12)
@@ -34,13 +41,5 @@ struct YT4SApp: App {
         }
         .defaultSize(width: 640, height: 760)
         .windowResizability(.contentMinSize)
-    }
-}
-
-/// The one-column main window. Empty until the paste box, Queue and footer slices land.
-struct MainWindow: View {
-    var body: some View {
-        Color.clear
-            .frame(minWidth: 560, minHeight: 640)
     }
 }

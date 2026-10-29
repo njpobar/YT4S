@@ -41,17 +41,30 @@ struct FakeYtDlp {
         try await runRaw(YtDlpCommand(tools: tools).arguments(arguments), scenario: scenario, extraEnvironment: extraEnvironment)
     }
 
+    /// A real `YtDlpRunner` with the fake injected as the yt-dlp executable.
+    func runner(scenario: String, extraEnvironment: [String: String] = [:]) -> YtDlpRunner {
+        YtDlpRunner(tools: tools, environment: environment(scenario: scenario, extraEnvironment: extraEnvironment))
+    }
+
+    func environment(scenario: String, extraEnvironment: [String: String] = [:]) -> [String: String] {
+        var environment = ProcessInfo.processInfo.environment
+        environment["YT4S_FAKE_SCENARIO"] = scenario
+        environment["YT4S_FAKE_ARGV_LOG"] = argvLog.path
+        environment.merge(extraEnvironment) { _, new in new }
+        return environment
+    }
+
     /// Runs the fake with exactly `arguments`, skipping `YtDlpCommand`.
     func runRaw(
         _ arguments: [String],
         scenario: String,
         extraEnvironment: [String: String] = [:]
     ) async throws -> SubprocessResult {
-        var environment = ProcessInfo.processInfo.environment
-        environment["YT4S_FAKE_SCENARIO"] = scenario
-        environment["YT4S_FAKE_ARGV_LOG"] = argvLog.path
-        environment.merge(extraEnvironment) { _, new in new }
-        return try await Subprocess.run(executable: executable, arguments: arguments, environment: environment)
+        try await Subprocess.run(
+            executable: executable,
+            arguments: arguments,
+            environment: environment(scenario: scenario, extraEnvironment: extraEnvironment)
+        )
     }
 
     /// argv of the last run. The fake writes each element NUL-terminated.
