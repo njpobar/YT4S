@@ -95,7 +95,7 @@ import Testing
         let item = await download(fake)
 
         guard case .finished(let file) = item.state else { Issue.record("not finished"); return }
-        #expect(DownloadFolder(url: fake.downloadFolder).videoID(ofFileAt: file) == "abc123")
+        #expect(DownloadFolder(url: fake.downloadFolder).savedVideo(ofFileAt: file) == SavedVideo(videoID: "abc123", format: .video))
     }
 
     @Test func theFinalNameIsPredictedBeforeTheDownloadStarts() async throws {

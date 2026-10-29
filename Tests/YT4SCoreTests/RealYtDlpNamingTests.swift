@@ -41,15 +41,17 @@ struct RealYtDlpNamingTests {
             .sorted()
     }
 
-    @Test func aSingleVideoDatedAndTheSameTitleAgainFromAChannelFolder() async throws {
+    @Test func aSingleVideoDatedThenTheSameVideoFromItsChannelIsAlreadyDownloaded() async throws {
         let (folder, items) = try await download(
             "https://www.youtube.com/watch?v=jNQXAC9IVRw\nhttps://www.youtube.com/@jawed",
             DownloadOptions(format: .video, quality: .p720, naming: .dateTitle)
         )
 
-        #expect(items.allSatisfy { $0.isFinished })
-        #expect(files(in: folder) == ["2005-04-24 - Me at the zoo.mp4", "jawed/2005-04-24 - Me at the zoo.mp4"])
-        #expect(DownloadFolder(url: folder).videoID(ofFileAt: folder.appendingPathComponent("jawed/2005-04-24 - Me at the zoo.mp4")) == "jNQXAC9IVRw")
+        // The channel's only video is the one just downloaded: Already downloaded, not fetched twice.
+        let saved = folder.appendingPathComponent("2005-04-24 - Me at the zoo.mp4")
+        #expect(items.map(\.state) == [.finished(file: saved), .alreadyDownloaded(file: saved)])
+        #expect(files(in: folder) == ["2005-04-24 - Me at the zoo.mp4"])
+        #expect(DownloadFolder(url: folder).savedVideo(ofFileAt: saved) == SavedVideo(videoID: "jNQXAC9IVRw", format: .video))
     }
 
     @Test func aPlaylistAsMP3WithChannelTitle() async throws {
