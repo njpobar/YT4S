@@ -134,10 +134,10 @@ public enum DownloadArguments {
         case .video:
             ["-f", videoSelector(maxHeight: options.quality.maxHeight)]
                 // QuickTime (and Sarah's M1) play H.264 + AAC; YouTube's top formats are often AV1 / VP9 + Opus.
-                // Sorting prefers H.264, then the highest resolution, then AAC, and still takes any codec
-                // when no H.264 stream exists. Verified against real yt-dlp: on a 4K video Best picks
-                // 1080p avc1 + mp4a, not 2160p AV1.
-                + ["-S", "vcodec:h264,res,acodec:aac"]
+                // Sorting prefers H.264, then resolution, then AAC, and still takes any codec when no
+                // H.264 stream exists. Verified against real yt-dlp: on a 4K video Best picks 1080p
+                // avc1 + mp4a, not 2160p AV1.
+                + ["-S", "vcodec:h264,\(resolutionSort(maxHeight: options.quality.maxHeight)),acodec:aac"]
                 + ["--merge-output-format", "mp4"]
         case .mp3:
             ["-f", "ba/b"]
@@ -149,10 +149,17 @@ public enum DownloadArguments {
         }
     }
 
-    /// Best streams at or below `maxHeight`; only if none exist, the best above it.
+    /// Streams at or below `maxHeight` when any exist (the filter); otherwise anything, ranked by
+    /// `resolutionSort` so the smallest above the cap wins.
     private static func videoSelector(maxHeight: Int?) -> String {
         guard let maxHeight else { return "bv*+ba/b" }
         return "bv*[height<=\(maxHeight)]+ba/b[height<=\(maxHeight)]/bv*+ba/b"
+    }
+
+    /// `res:N` ranks the largest resolution up to N first and, above N, the smallest first, so a
+    /// video with nothing at or below the cap still comes as close to it as it can.
+    private static func resolutionSort(maxHeight: Int?) -> String {
+        maxHeight.map { "res:\($0)" } ?? "res"
     }
 
     /// yt-dlp never picks the final name: it downloads to `<id>.<ext>` in the hidden incomplete

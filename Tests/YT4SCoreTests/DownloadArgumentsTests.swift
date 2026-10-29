@@ -31,13 +31,16 @@ import Testing
 
     // Every Video preset prefers QuickTime-playable H.264 + AAC (M1 cannot hardware-decode AV1,
     // QuickTime cannot play VP9 / Opus), falls back to any codec, and merges into an MP4.
-    private let quickTimeFriendlySort = ["-S", "vcodec:h264,res,acodec:aac"]
+    // What each preset really picks is in QualityPresetSelectionTests (real yt-dlp).
+    private func quickTimeFriendlySort(_ resolution: String = "res") -> [String] {
+        ["-S", "vcodec:h264,\(resolution),acodec:aac"]
+    }
 
     @Test func videoBestPrefersH264AndAACAtTheHighestResolution() {
         let argv = arguments(.video, .best)
 
         #expect(argv.containsSequence(["-f", "bv*+ba/b"]))
-        #expect(argv.containsSequence(quickTimeFriendlySort))
+        #expect(argv.containsSequence(quickTimeFriendlySort()))
         #expect(argv.containsSequence(["--merge-output-format", "mp4"]))
     }
 
@@ -45,7 +48,7 @@ import Testing
         let argv = arguments(.video, .p1080)
 
         #expect(argv.containsSequence(["-f", "bv*[height<=1080]+ba/b[height<=1080]/bv*+ba/b"]))
-        #expect(argv.containsSequence(quickTimeFriendlySort))
+        #expect(argv.containsSequence(quickTimeFriendlySort("res:1080")))
         #expect(argv.containsSequence(["--merge-output-format", "mp4"]))
     }
 
@@ -53,7 +56,7 @@ import Testing
         let argv = arguments(.video, .p720)
 
         #expect(argv.containsSequence(["-f", "bv*[height<=720]+ba/b[height<=720]/bv*+ba/b"]))
-        #expect(argv.containsSequence(quickTimeFriendlySort))
+        #expect(argv.containsSequence(quickTimeFriendlySort("res:720")))
         #expect(argv.containsSequence(["--merge-output-format", "mp4"]))
     }
 
