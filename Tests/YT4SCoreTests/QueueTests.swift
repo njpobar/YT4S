@@ -315,21 +315,21 @@ import Testing
         #expect(queue.items[0].isFinished)
     }
 
-    @Test func isDownloadingWhileAnyVideoIsWaitingOrRunning() async throws {
+    @Test func hasActiveDownloadsWhileAnyVideoIsWaitingOrRunning() async throws {
         let fake = try FakeYtDlp()
         let queue = Queue(runner: fake.runner(scenario: "slow", extraEnvironment: ["YT4S_FAKE_STEP_DELAY": "0.1"]))
-        #expect(!queue.isDownloading)
+        #expect(!queue.hasActiveDownloads)
 
         let first = queue.add(request(fake, id: "first"))
         let second = queue.add(request(fake, id: "second"))
-        #expect(queue.isDownloading)
+        #expect(queue.hasActiveDownloads)
 
         queue.cancel(second)
-        #expect(queue.isDownloading, "the first video is still going")
+        #expect(queue.hasActiveDownloads, "the first video is still going")
         queue.cancel(first)
         await queue.waitUntilIdle()
 
-        #expect(!queue.isDownloading)
+        #expect(!queue.hasActiveDownloads)
     }
 
     @Test func reportsOnceWhenABatchFinishes() async throws {

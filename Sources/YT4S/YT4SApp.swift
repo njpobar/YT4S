@@ -12,10 +12,7 @@ struct YT4SApp: App {
 
     init() {
         models = installLocation.mustMove ? nil : Self.makeModels()
-    }
-
-    init() {
-        model.queue.onBatchFinished = { BatchNotifier.batchFinished($0) }
+        models?.window.queue.onBatchFinished = { BatchNotifier.batchFinished($0) }
     }
 
     var body: some Scene {

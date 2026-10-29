@@ -114,9 +114,9 @@ public final class Queue {
 
     public var isIdle: Bool { worker == nil }
 
-    /// True while any video is waiting or running. Observable: the footer update buttons
-    /// disable themselves on it (ADR 0002).
-    public var isDownloading: Bool { items.contains(where: \.isActive) }
+    /// True while any video is waiting or running. Derived from `items`, so it is observable:
+    /// both footer update buttons disable themselves on it (ADR 0002).
+    public var hasActiveDownloads: Bool { items.contains(where: \.isActive) }
 
     /// Stops a pending or running item and deletes its partial files. No effect on other states.
     public func cancel(_ id: QueueItem.ID) {

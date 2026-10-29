@@ -127,16 +127,3 @@ public final class YtDlpUpdateModel {
         current = copy
     }
 }
-
-extension Queue {
-    /// Whether any item is pending or running: both update buttons are disabled meanwhile.
-    /// Derived from `items`, so it is observable.
-    public var hasActiveDownloads: Bool {
-        items.contains {
-            switch $0.state {
-            case .pending, .running: true
-            case .finished, .failed: false
-            }
-        }
-    }
-}
