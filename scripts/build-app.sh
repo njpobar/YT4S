@@ -3,8 +3,10 @@
 # then runs the post-signing gate. Exits non-zero if any step or gate check fails.
 #
 # Usage: scripts/build-app.sh
+#   YT4S_VERSION / YT4S_BUILD_NUMBER override VERSION and the commit count (release.sh sets both).
 set -euo pipefail
 source "$(dirname "$0")/lib/deps.sh"
+source "$(dirname "$0")/lib/version.sh"
 
 BUNDLE_ID="com.njpobar.YT4S"
 BUILD_DIR="$REPO_ROOT/build"
@@ -21,10 +23,12 @@ step() { echo "==> $*"; }
 step "Fetching pinned binaries"
 "$REPO_ROOT/scripts/fetch-deps.sh"
 
-version=$(tr -d '[:space:]' < "$REPO_ROOT/VERSION")
-[[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "VERSION must be semver X.Y.Z, got '$version'"
-# Monotonic build number: commits on the current branch (release.sh only builds from main).
-build_number=$(git -C "$REPO_ROOT" rev-list --count HEAD)
+# release.sh passes both explicitly (it builds before committing the VERSION bump it tags).
+version=${YT4S_VERSION:-$(read_version_file)}
+is_semver "$version" || die "version must be semver X.Y.Z, got '$version'"
+# Monotonic build number: commit count on main (see scripts/lib/version.sh).
+build_number=${YT4S_BUILD_NUMBER:-$(build_number)}
+[[ $build_number =~ ^[1-9][0-9]*$ ]] || die "build number must be a positive integer, got '$build_number'"
 
 step "Compiling YT4S $version ($build_number), release, arm64"
 swift build --package-path "$REPO_ROOT" -c release --arch arm64 --product YT4S
