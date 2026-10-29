@@ -96,6 +96,13 @@ public final class Queue {
     /// The item yt-dlp is working on, with the task to cancel to stop it.
     @ObservationIgnored private var current: (id: QueueItem.ID, task: Task<Void, Never>)?
 
+    /// Whether the Looks-outdated banner shows (`OutdatedBanner`): 2 or more videos of the batch
+    /// failed as Looks outdated, or the batch was a single video that did.
+    public private(set) var showsOutdatedBanner = false
+    /// The items queued or retried since the Queue was last idle.
+    @ObservationIgnored private var batch: Set<QueueItem.ID> = []
+    @ObservationIgnored private var batchOutdatedFailures = 0
+
     /// - Parameter partialFilesFolder: where yt-dlp keeps unfinished files (`-P temp:`), one
     ///   subfolder per item, so they never show up in the Download folder and Cancel / Retry can
     ///   delete them all.
@@ -119,6 +126,7 @@ public final class Queue {
     public func add(_ request: DownloadRequest) -> QueueItem.ID {
         let item = QueueItem(request: request, title: request.origin.title, videoID: request.origin.videoID)
         items.append(item)
+        joinBatch(item.id)
         startWorkerIfNeeded()
         return item.id
     }
@@ -167,6 +175,7 @@ public final class Queue {
         guard let item = items.first(where: { $0.id == id }), item.isRetryable else { return }
         deletePartialFiles(partialFilesFolder(for: id))
         update(id) { $0.state = .pending }
+        joinBatch(id)
         startWorkerIfNeeded()
     }
 
@@ -189,6 +198,7 @@ public final class Queue {
                 self.current = (next.id, task)
                 await task.value
                 self.current = nil
+                self.recordOutcome(next.id)
             }
             guard let self else { return }
             self.worker = nil
@@ -269,6 +279,23 @@ public final class Queue {
         } catch {
             update(id) { $0.state = .failed(DownloadFailure(termination: nil, details: String(describing: error))) }
         }
+    }
+
+    /// An item queued or retried while the Queue is idle starts a new batch.
+    private func joinBatch(_ id: QueueItem.ID) {
+        if worker == nil {
+            batch = []
+            batchOutdatedFailures = 0
+        }
+        batch.insert(id)
+    }
+
+    /// Applies the Looks-outdated banner rule (#11) to an item that just stopped running.
+    private func recordOutcome(_ id: QueueItem.ID) {
+        guard case .failed(let failure) = items.first(where: { $0.id == id })?.state,
+              failure.category == .looksOutdated else { return }
+        batchOutdatedFailures += 1
+        if batchOutdatedFailures >= 2 || batch.count == 1 { showsOutdatedBanner = true }
     }
 
     func partialFilesFolder(for id: QueueItem.ID) -> URL {

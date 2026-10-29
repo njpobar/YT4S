@@ -9,7 +9,8 @@
 #                            network-drop-once drops only on the first run (needs YT4S_FAKE_RUN_LOG)
 #   YT4S_FAKE_SCENARIO_FILE  if set and the file exists, its contents override YT4S_FAKE_SCENARIO
 #                            (lets a test change the outcome between two runs, e.g. for Retry)
-#   YT4S_FAKE_FAIL_IDS       video-failure: comma-separated video IDs that fail (default: every video)
+#   YT4S_FAKE_FAIL_IDS       video-failure, outdated: comma-separated video IDs that fail (default: every video;
+#                            under outdated the others succeed)
 #   YT4S_FAKE_ERROR_MESSAGE  overrides the ERROR line text for failing scenarios ("<id>" is replaced)
 #   YT4S_FAKE_STEP_DELAY     seconds between progress steps (default 0, slow: 1)
 #   YT4S_FAKE_VERSION        printed by --version (default 2026.10.21)
@@ -244,7 +245,7 @@ video_id_for() {
   fi
 }
 
-fails() {  # fails ID -> 0 if this video should fail under video-failure
+fails() {  # fails ID -> 0 if this video should fail under video-failure or outdated
   [[ -z ${YT4S_FAKE_FAIL_IDS:-} ]] && return 0
   [[ ",${YT4S_FAKE_FAIL_IDS}," == *",$1,"* ]]
 }
@@ -293,7 +294,7 @@ process_video() {  # process_video ID [PLAYLIST_TITLE INDEX COUNT CHANNEL]
   say "[youtube] Extracting URL: ${info[webpage_url]}"
   say "[youtube] $id: Downloading webpage"
 
-  if [[ $scenario == outdated ]]; then
+  if [[ $scenario == outdated ]] && fails $id; then
     print -u2 -r -- "WARNING: [youtube] $id: nsig extraction failed: Some formats may be missing"
     error_line $id "[youtube] <id>: Unable to extract player response; please report this issue on  https://github.com/yt-dlp/yt-dlp/issues?q= , filling out the appropriate issue template. Confirm you are on the latest version using  yt-dlp -U"
     any_failed=1; return
