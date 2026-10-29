@@ -21,6 +21,8 @@ public enum QueueItemState: Equatable, Sendable {
     case pending
     case running(DownloadProgress)
     case finished(file: URL)
+    /// Skipped because its Format is already in the Download folder (set by skip detection, #24).
+    case alreadyDownloaded(file: URL)
     case failed(DownloadFailure)
     /// Stopped by the user before it finished; its partial files are gone.
     case cancelled
@@ -50,7 +52,15 @@ public struct QueueItem: Identifiable, Equatable, Sendable {
     public var isActive: Bool {
         switch state {
         case .pending, .running: true
-        case .finished, .failed, .cancelled: false
+        case .finished, .alreadyDownloaded, .failed, .cancelled: false
+        }
+    }
+
+    /// Finished or Already downloaded: what "Clear finished" removes.
+    public var isDone: Bool {
+        switch state {
+        case .finished, .alreadyDownloaded: true
+        case .pending, .running, .failed, .cancelled: false
         }
     }
 }
@@ -112,14 +122,14 @@ public final class Queue {
             update(id) { $0.state = .cancelled }
         case .running:
             if current?.id == id { current?.task.cancel() }
-        case .finished, .failed, .cancelled:
+        case .finished, .alreadyDownloaded, .failed, .cancelled:
             break
         }
     }
 
-    /// Removes every finished row. Files on disk are never touched.
+    /// Removes every finished and Already downloaded row. Files on disk are never touched.
     public func clearFinished() {
-        items.removeAll { $0.isFinished }
+        items.removeAll(where: \.isDone)
     }
 
     /// Removes one row that is not waiting or running. Files on disk are never touched.

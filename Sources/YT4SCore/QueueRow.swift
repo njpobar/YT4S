@@ -32,6 +32,8 @@ public struct QueueRow: Equatable, Sendable {
             // Placeholder until the failure categories ticket gives one sentence per category.
             status = "Couldn't download this video."
             tone = .failure
+        case .alreadyDownloaded:
+            status = "Already downloaded"
         case .cancelled:
             status = "Cancelled"
         }
