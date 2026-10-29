@@ -5,19 +5,12 @@ import Testing
 /// The custom Naming pattern preview, rendered offline by the real bundled yt-dlp from sample
 /// metadata ("My Video" by "Some Channel", 2026-10-12, item 1 of 12 in "My Playlist"): the same
 /// template language and the same details line as a real download. Runs when the repo's
-/// `vendor/` holds the tools (run `scripts/fetch-deps.sh`), or `YT4S_REAL_TOOLS` names them.
-/// The real yt-dlp for offline tests: `YT4S_REAL_TOOLS` (a folder in the app's `bin` layout), else
-/// the repo's `vendor/`. `nil` when neither has it.
+/// `vendor/` holds the tools (run `scripts/fetch-deps.sh`), or `YT4S_LIVE_APP` names a built app.
+/// The real yt-dlp for offline tests: the `YT4S_LIVE_APP` app's (see `LiveTests`), else the
+/// repo's `vendor/`. `nil` when neither has it.
 enum LocalYtDlp {
     static var tools: BundledTools? {
-        if let bin = ProcessInfo.processInfo.environment["YT4S_REAL_TOOLS"] {
-            let folder = URL(fileURLWithPath: bin, isDirectory: true)
-            return BundledTools(
-                ytDlp: folder.appendingPathComponent("yt-dlp/yt-dlp_macos"),
-                ffmpegDirectory: folder,
-                deno: folder.appendingPathComponent("deno")
-            )
-        }
+        if let tools = LiveTests.tools { return tools }
         let vendor = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("vendor", isDirectory: true)

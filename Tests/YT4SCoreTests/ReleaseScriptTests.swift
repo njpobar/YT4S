@@ -22,7 +22,7 @@ import Testing
         let swiftRuns = try sandbox.invocations(sandbox.swiftLog)
         #expect(swiftRuns.first?.prefix(1) == ["test"])
         #expect(swiftRuns.dropFirst().map { Array($0.prefix(2)) } == [["YT4S_LIVE_APP=\(sandbox.file("build/YT4S.app").path)", "test"]])
-        #expect(swiftRuns.last.map { $0.contains("--filter") && $0.contains("LiveContractTests") } == true)
+        #expect(swiftRuns.last?.contains("^YT4SCoreTests\\.LiveContractTests/") == true)
 
         // One draft release with exactly the zip, its appcast and the DMG.
         let create = try #require(try releaseCreations(sandbox).first)

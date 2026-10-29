@@ -102,7 +102,7 @@ built_build=$(plutil -extract CFBundleVersion raw "$plist")
 step "Gate: live contract test against the built app"
 contract_report="$REPO_ROOT/build/live-contract-tests.xml"
 rm -f "$contract_report"
-YT4S_LIVE_APP=$APP swift test --package-path "$REPO_ROOT" --filter LiveContractTests --xunit-output "$contract_report" \
+YT4S_LIVE_APP=$APP swift test --package-path "$REPO_ROOT" --filter "^YT4SCoreTests\.LiveContractTests/" --xunit-output "$contract_report" \
   || die "live contract test failed; the bundled yt-dlp or ffmpeg no longer does what YT4S expects"
 # A renamed suite or a skip passes with nothing run; the gate only counts if every test ran.
 ran=$(xmllint --xpath 'count(//testcase[not(skipped)])' "$contract_report" 2> /dev/null || echo 0)
