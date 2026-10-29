@@ -11,6 +11,13 @@ struct MainWindow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            if model.queue.showsOutdatedBanner {
+                OutdatedBannerView(
+                    text: OutdatedBanner.text(updateAppliedThisSession: ytDlpUpdates.hasAppliedUpdateThisSession),
+                    dismiss: { model.queue.dismissOutdatedBanner() }
+                )
+                .padding(.bottom, 12)
+            }
             PasteBox(text: $model.pasteText)
             PasteLabels(paste: model.paste, listingMessage: model.listingMessage)
 
@@ -58,7 +65,7 @@ struct MainWindow: View {
 
             Divider()
                 .padding(.vertical, 10)
-            UpdateFooter(ytDlp: ytDlpUpdates, app: appUpdate)
+            UpdateFooter(ytDlp: ytDlpUpdates, app: appUpdate, highlightsUpdateYtDlp: model.queue.showsOutdatedBanner)
         }
         .padding(18)
         .frame(minWidth: 560, minHeight: 640)
@@ -183,6 +190,35 @@ private struct CustomPreviewLine: View {
         .lineLimit(1)
         .truncationMode(.middle)
         .textSelection(.enabled)
+    }
+}
+
+/// "YouTube may have changed..." (prototype nudge): points at the footer's Update yt-dlp, which
+/// is highlighted while this shows; it never runs the update itself (ADR 0002).
+private struct OutdatedBannerView: View {
+    let text: String
+    let dismiss: () -> Void
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+            Text(text)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Button(action: dismiss) {
+                Image(systemName: "xmark")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.borderless)
+            .help("Dismiss")
+            .accessibilityLabel("Dismiss")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.orange.opacity(0.45)))
     }
 }
 
