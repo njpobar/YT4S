@@ -134,4 +134,19 @@ import Testing
         await model.waitUntilListed()
         #expect(model.listingMessage == nil)
     }
+
+    @Test func listingCountsAsDownloadsRunningSoUpdatesStayDisabled() async throws {
+        let fake = try FakeYtDlp()
+        let model = model(fake, ["YT4S_FAKE_LIST_DELAY": "1", "YT4S_FAKE_PLAYLIST_IDS": "aaaaaaaaaaa"])
+        model.pasteText = "https://www.youtube.com/playlist?list=PLabc"
+        #expect(!model.downloadsRunning)
+
+        model.download()
+        #expect(model.queue.items.isEmpty)
+        #expect(model.downloadsRunning)
+
+        await model.waitUntilListed()
+        await model.queue.waitUntilIdle()
+        #expect(!model.downloadsRunning)
+    }
 }

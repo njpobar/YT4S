@@ -158,15 +158,17 @@ extension YT4SApp {
             root: YtDlpInstallations.defaultRoot(bundleIdentifier: Bundle.main.bundleIdentifier ?? "com.njpobar.YT4S"),
             bundled: BundledYtDlp(resourcesDirectory: resources)
         )
-        // The Queue is created after the yt-dlp update model (it needs its selection), so this is read lazily.
-        let queueBox = QueueBox()
-        let downloadsRunning: @MainActor () -> Bool = { queueBox.queue?.hasActiveDownloads ?? false }
+        // The window model is created after the yt-dlp update model (its Queue needs the
+        // selection), so this is read lazily. Listing a Playlist or Channel counts as running.
+        let windowBox = WindowModelBox()
+        let downloadsRunning: @MainActor () -> Bool = { windowBox.model?.downloadsRunning ?? false }
         let ytDlpUpdates = YtDlpUpdateModel(
             updater: YtDlpUpdater(installations: installations, http: URLSessionHTTPClient()),
             downloadsRunning: downloadsRunning
         )
         let queue = Queue(runner: YtDlpRunner(tools: BundledTools(resourcesDirectory: resources), selection: ytDlpUpdates.selection))
-        queueBox.queue = queue
+        let window = MainWindowModel(queue: queue, settings: Settings(defaults: .standard))
+        windowBox.model = window
         queue.dismissesOutdatedBanner(whenSwitching: ytDlpUpdates)
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
         let appUpdate = AppUpdateModel(
@@ -177,7 +179,7 @@ extension YT4SApp {
         Task { await ytDlpUpdates.launch() }
         appUpdate.start()
         return WindowModels(
-            window: MainWindowModel(queue: queue, settings: Settings(defaults: .standard)),
+            window: window,
             ytDlpUpdates: ytDlpUpdates,
             appUpdate: appUpdate
         )
@@ -185,6 +187,6 @@ extension YT4SApp {
 }
 
 @MainActor
-private final class QueueBox {
-    var queue: Queue?
+private final class WindowModelBox {
+    var model: MainWindowModel?
 }

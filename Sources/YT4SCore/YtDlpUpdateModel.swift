@@ -46,7 +46,7 @@ public final class YtDlpUpdateModel {
     @ObservationIgnored private var periodicCheck: Task<Void, Never>?
 
     /// - Parameter downloadsRunning: whether any Queue item is pending or running; read on every
-    ///   access, so pass a closure over observable state (e.g. `queue.hasActiveDownloads`).
+    ///   access, so pass a closure over observable state (e.g. `MainWindowModel.downloadsRunning`).
     public init(
         updater: YtDlpUpdater,
         checkInterval: Duration = .seconds(24 * 60 * 60),

@@ -133,9 +133,15 @@ public final class MainWindowModel {
         return parts.isEmpty ? nil : "Looking up the videos of \(parts.joined(separator: " and "))..."
     }
 
+    /// True while any download is running: a Queue row is waiting or running, or a Playlist or
+    /// Channel source is still being listed (its rows are not in the Queue yet). Observable; both
+    /// footer update buttons disable themselves on it (ADR 0002).
+    public var downloadsRunning: Bool { queue.hasActiveDownloads || listing != nil }
+
     /// Playlist and Channel sources still being listed, in paste order.
     private var listingSources: [Source] = []
-    @ObservationIgnored private var listing: Task<Void, Never>?
+    /// The pasted Sources being listed and queued; observed, as it counts as `downloadsRunning`.
+    private var listing: Task<Void, Never>?
     @ObservationIgnored private var listingGeneration = 0
 
     /// Queues one row per video of every pasted Source, in paste order, and clears the paste box

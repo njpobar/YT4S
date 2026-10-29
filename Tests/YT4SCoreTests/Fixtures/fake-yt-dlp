@@ -15,6 +15,7 @@
 #   YT4S_FAKE_STEP_DELAY     seconds between progress steps (default 0, slow: 1)
 #   YT4S_FAKE_VERSION        printed by --version (default 2026.10.21)
 #   YT4S_FAKE_PLAYLIST_IDS   entries for playlist/channel URLs (default p1,p2,p3; empty: no entries)
+#   YT4S_FAKE_LIST_DELAY     seconds a --flat-playlist listing takes before its first entry (default 0)
 #   YT4S_FAKE_PLAYLIST_ERROR if set, listing a playlist/channel fails with this ERROR text (exit 1)
 #   YT4S_FAKE_ARGV_LOG       if set, argv is written there, each element NUL-terminated
 #   YT4S_FAKE_RUN_LOG        if set, one line (the scenario) is appended there per run
@@ -393,6 +394,7 @@ for url in "${urls[@]}"; do
       any_failed=1; continue
     fi
     say "[download] Downloading playlist: $title"
+    [[ -n ${seen[--flat-playlist]:-} ]] && sleep ${YT4S_FAKE_LIST_DELAY:-0}
     for (( i = 1; i <= ${#entries}; i++ )); do
       say "[download] Downloading item $i of ${#entries}"
       if [[ -n ${seen[--flat-playlist]:-} ]]; then
