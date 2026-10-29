@@ -132,6 +132,12 @@ struct NamePlanTests {
         #expect(!file.contains(" .mp4"))
     }
 
+    @Test func eachPresetShowsAnExampleNameInTheChosenFormat() {
+        #expect(NamingPattern.title.example(format: .video) == "My Video.mp4")
+        #expect(NamingPattern.channelTitle.example(format: .video) == "Some Channel - My Video.mp4")
+        #expect(NamingPattern.dateTitle.example(format: .mp3) == "2026-10-12 - My Video.mp3")
+    }
+
     @Test func mp3KeepsTheSameNameWithItsOwnExtension() {
         #expect(path(.title, zoo, ext: "mp3") == "Me at the zoo.mp3")
     }

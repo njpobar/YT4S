@@ -98,6 +98,19 @@ public struct NamePlan: Equatable, Sendable {
     }
 }
 
+extension NamingPattern {
+    /// The "e.g." file name shown next to the Naming pattern control.
+    public func example(format: Format) -> String {
+        let sample = VideoDetails(id: "dQw4w9WgXcQ", title: "My Video", channel: "Some Channel", uploadDate: "20261012")
+        let request = DownloadRequest(
+            url: "", downloadFolder: URL(fileURLWithPath: "/"),
+            options: DownloadOptions(format: format, quality: .best, naming: self)
+        )
+        return request.namePlan(for: sample)
+            .relativePath(videoID: sample.id, fileExtension: request.expectedFileExtension, withIDSuffix: false)
+    }
+}
+
 extension DownloadRequest {
     /// Where this request's video goes under its Naming pattern, once yt-dlp has looked it up.
     public func namePlan(for video: VideoDetails) -> NamePlan {
