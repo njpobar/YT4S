@@ -252,4 +252,54 @@ import Testing
         #expect(queue.items[0].state == finished)
         #expect(queue.isIdle)
     }
+
+    @Test func clearFinishedRemovesOnlyFinishedRows() async throws {
+        let fake = try FakeYtDlp()
+        let queue = Queue(runner: fake.runner(scenario: "video-failure", extraEnvironment: ["YT4S_FAKE_FAIL_IDS": "bad"]))
+
+        queue.add(request(fake, id: "good"))
+        queue.add(request(fake, id: "bad"))
+        let cancelled = queue.add(request(fake, id: "later"))
+        queue.cancel(cancelled)
+        await queue.waitUntilIdle()
+
+        queue.clearFinished()
+
+        #expect(queue.items.map(\.request) == [request(fake, id: "bad"), request(fake, id: "later")])
+        #expect(queue.items[0].isFailed)
+        #expect(queue.items[1].state == .cancelled)
+        #expect(files(in: fake.downloadFolder) == ["Fake Video good.mp4"], "clearing a row never deletes its file")
+    }
+
+    @Test func removeDropsACancelledRowButNotAnActiveOne() async throws {
+        let fake = try FakeYtDlp()
+        let queue = Queue(runner: fake.runner(scenario: "slow", extraEnvironment: ["YT4S_FAKE_STEP_DELAY": "0.1"]))
+
+        let running = queue.add(request(fake, id: "first"))
+        let cancelled = queue.add(request(fake, id: "second"))
+        queue.cancel(cancelled)
+        queue.remove(cancelled)
+        queue.remove(running)
+
+        #expect(queue.items.map(\.id) == [running])
+        await queue.waitUntilIdle()
+        #expect(queue.items[0].isFinished)
+    }
+
+    @Test func isDownloadingWhileAnyVideoIsWaitingOrRunning() async throws {
+        let fake = try FakeYtDlp()
+        let queue = Queue(runner: fake.runner(scenario: "slow", extraEnvironment: ["YT4S_FAKE_STEP_DELAY": "0.1"]))
+        #expect(!queue.isDownloading)
+
+        let first = queue.add(request(fake, id: "first"))
+        let second = queue.add(request(fake, id: "second"))
+        #expect(queue.isDownloading)
+
+        queue.cancel(second)
+        #expect(queue.isDownloading, "the first video is still going")
+        queue.cancel(first)
+        await queue.waitUntilIdle()
+
+        #expect(!queue.isDownloading)
+    }
 }

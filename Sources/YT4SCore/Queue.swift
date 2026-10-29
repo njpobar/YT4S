@@ -46,6 +46,13 @@ public struct QueueItem: Identifiable, Equatable, Sendable {
 
     public var isFinished: Bool { if case .finished = state { true } else { false } }
     public var isFailed: Bool { if case .failed = state { true } else { false } }
+    /// Waiting or running: yt-dlp has work left to do for it.
+    public var isActive: Bool {
+        switch state {
+        case .pending, .running: true
+        case .finished, .failed, .cancelled: false
+        }
+    }
 }
 
 /// The visible list of pending, running, finished and failed downloads.
@@ -93,6 +100,10 @@ public final class Queue {
 
     public var isIdle: Bool { worker == nil }
 
+    /// True while any video is waiting or running. Observable: the footer update buttons
+    /// disable themselves on it (ADR 0002).
+    public var isDownloading: Bool { items.contains(where: \.isActive) }
+
     /// Stops a pending or running item and deletes its partial files. No effect on other states.
     public func cancel(_ id: QueueItem.ID) {
         guard let item = items.first(where: { $0.id == id }) else { return }
@@ -104,6 +115,16 @@ public final class Queue {
         case .finished, .failed, .cancelled:
             break
         }
+    }
+
+    /// Removes every finished row. Files on disk are never touched.
+    public func clearFinished() {
+        items.removeAll { $0.isFinished }
+    }
+
+    /// Removes one row that is not waiting or running. Files on disk are never touched.
+    public func remove(_ id: QueueItem.ID) {
+        items.removeAll { $0.id == id && !$0.isActive }
     }
 
     /// Re-runs a failed or cancelled item with its original request (Format, Quality preset,
