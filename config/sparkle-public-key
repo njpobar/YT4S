@@ -1,0 +1,4 @@
+# Sparkle EdDSA public key (SUPublicEDKey), base64, on the line below this comment.
+# Empty until Nick runs the one-time key setup in README.md ("Signing key for app updates").
+# scripts/write-info-plist.sh bakes it into the app; release.sh refuses to run while it is empty
+# or when it does not match the private key in the login Keychain.

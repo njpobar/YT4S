@@ -131,4 +131,35 @@ import Testing
         #expect(result.termination == .exited(0))
         #expect(result.stdoutLines == ["2026.10.26.220202"])
     }
+
+    @Test func partialFilesGoUnderTheTempPathAndAreRemovedOnSuccess() async throws {
+        let fake = try FakeYtDlp()
+        let temp = fake.downloadFolder.deletingLastPathComponent().appendingPathComponent("partial")
+        let arguments = ["-P", "home:" + fake.downloadFolder.path, "-P", "temp:" + temp.path, "-o", "%(id)s.%(ext)s", "https://youtu.be/abc123"]
+
+        let dropped = try await fake.run(arguments, scenario: "network-drop")
+        #expect(dropped.termination == .exited(1))
+        #expect(FileManager.default.fileExists(atPath: temp.path + "/abc123.mp4.part"))
+        #expect(try FileManager.default.contentsOfDirectory(atPath: fake.downloadFolder.path).isEmpty)
+
+        let succeeded = try await fake.run(arguments, scenario: "success")
+        #expect(succeeded.termination == .exited(0))
+        #expect(!FileManager.default.fileExists(atPath: temp.path + "/abc123.mp4.part"))
+        #expect(try FileManager.default.contentsOfDirectory(atPath: fake.downloadFolder.path) == ["abc123.mp4"])
+    }
+
+    @Test func aScenarioFileOverridesTheScenarioBetweenRuns() async throws {
+        let fake = try FakeYtDlp()
+        let file = fake.downloadFolder.deletingLastPathComponent().appendingPathComponent("scenario")
+        let arguments = ["-P", fake.downloadFolder.path, "https://youtu.be/abc123"]
+        let environment = ["YT4S_FAKE_SCENARIO_FILE": file.path]
+
+        try "outdated".write(to: file, atomically: true, encoding: .utf8)
+        let first = try await fake.run(arguments, scenario: "success", extraEnvironment: environment)
+        try "success".write(to: file, atomically: true, encoding: .utf8)
+        let second = try await fake.run(arguments, scenario: "outdated", extraEnvironment: environment)
+
+        #expect(first.termination == .exited(1))
+        #expect(second.termination == .exited(0))
+    }
 }

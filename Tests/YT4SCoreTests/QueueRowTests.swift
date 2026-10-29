@@ -52,4 +52,25 @@ import Testing
         #expect(QueueRow(QueueItem(request: request, state: .running(DownloadProgress()))).showsProgress)
         #expect(!QueueRow(QueueItem(request: request)).showsProgress)
     }
+
+    @Test func stoppedRowsSayWhy() {
+        let file = URL(fileURLWithPath: "/tmp/YT4S/Me at the zoo.mp4")
+        #expect(QueueRow(QueueItem(request: request, state: .cancelled)).status == "Cancelled")
+        #expect(QueueRow(QueueItem(request: request, state: .alreadyDownloaded(file: file))).status == "Already downloaded")
+        #expect(QueueRow(QueueItem(request: request, state: .alreadyDownloaded(file: file))).tone == .skipped)
+    }
+
+    @Test func eachStateOffersItsActions() {
+        let file = URL(fileURLWithPath: "/tmp/YT4S/Me at the zoo.mp4")
+        func actions(_ state: QueueItemState) -> [QueueRow.Action] {
+            QueueRow(QueueItem(request: request, state: state)).actions
+        }
+
+        #expect(actions(.pending) == [.cancel])
+        #expect(actions(.running(DownloadProgress())) == [.cancel])
+        #expect(actions(.finished(file: file)) == [.showInFinder(file)])
+        #expect(actions(.alreadyDownloaded(file: file)) == [.showInFinder(file)])
+        #expect(actions(.failed(DownloadFailure(termination: .exited(1), details: "ERROR: x"))) == [.retry])
+        #expect(actions(.cancelled) == [.retry, .remove])
+    }
 }

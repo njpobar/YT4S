@@ -4,11 +4,11 @@
 #
 # Usage: scripts/build-app.sh
 #   YT4S_VERSION / YT4S_BUILD_NUMBER override VERSION and the commit count (release.sh sets both).
+#   YT4S_SPARKLE_PUBLIC_KEY / YT4S_FEED_URL: local update tests only (see write-info-plist.sh).
 set -euo pipefail
 source "$(dirname "$0")/lib/deps.sh"
 source "$(dirname "$0")/lib/version.sh"
 
-BUNDLE_ID="com.njpobar.YT4S"
 BUILD_DIR="$REPO_ROOT/build"
 APP="$BUILD_DIR/YT4S.app"
 CONTENTS="$APP/Contents"
@@ -47,6 +47,8 @@ ditto "$VENDOR_DIR/yt-dlp" "$BIN/yt-dlp"
 rm -f "$BIN/yt-dlp/.yt4s-sha256"
 cp "$VENDOR_DIR/deno/deno" "$VENDOR_DIR/ffmpeg/ffmpeg" "$VENDOR_DIR/ffprobe/ffprobe" "$BIN/"
 chmod 755 "$BIN/deno" "$BIN/ffmpeg" "$BIN/ffprobe" "$BIN/yt-dlp/yt-dlp_macos"
+# The bundled floor's tag: the app compares it with downloaded copies (BundledYtDlp, ADR 0002).
+lock_field yt-dlp version > "$BIN/yt-dlp-version"
 
 # ffmpeg is GPLv3 (--enable-gpl --enable-version3): ship the license and where to get the source.
 ffmpeg_version=$(lock_field ffmpeg version)
@@ -62,41 +64,7 @@ Build script: https://git.martin-riedl.de/ffmpeg/build-script
 $("$VENDOR_DIR/ffmpeg/ffmpeg" -hide_banner -version | sed -n '1p;/^configuration:/p')
 EOF
 
-cat > "$CONTENTS/Info.plist" <<EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>CFBundleDevelopmentRegion</key>
-    <string>en</string>
-    <key>CFBundleDisplayName</key>
-    <string>YT4S</string>
-    <key>CFBundleExecutable</key>
-    <string>YT4S</string>
-    <key>CFBundleIdentifier</key>
-    <string>$BUNDLE_ID</string>
-    <key>CFBundleInfoDictionaryVersion</key>
-    <string>6.0</string>
-    <key>CFBundleName</key>
-    <string>YT4S</string>
-    <key>CFBundlePackageType</key>
-    <string>APPL</string>
-    <key>CFBundleShortVersionString</key>
-    <string>$version</string>
-    <key>CFBundleVersion</key>
-    <string>$build_number</string>
-    <key>LSApplicationCategoryType</key>
-    <string>public.app-category.utilities</string>
-    <key>LSMinimumSystemVersion</key>
-    <string>14.0</string>
-    <key>NSHighResolutionCapable</key>
-    <true/>
-    <key>NSPrincipalClass</key>
-    <string>NSApplication</string>
-</dict>
-</plist>
-EOF
-plutil -lint "$CONTENTS/Info.plist" > /dev/null
+"$REPO_ROOT/scripts/write-info-plist.sh" "$CONTENTS/Info.plist" "$version" "$build_number"
 
 # ---- 3. Ad-hoc sign, inside-out --------------------------------------------------------------
 # No Hardened Runtime (-o runtime), no entitlements, no App Sandbox (ADR 0002).
@@ -158,6 +126,9 @@ $output"
 
 step "Gate: bundled tools run from inside the app"
 gate_run "$BIN/yt-dlp/yt-dlp_macos" --version
+bundled_tag=$("$BIN/yt-dlp/yt-dlp_macos" --version)
+[ "$bundled_tag" = "$(cat "$BIN/yt-dlp-version")" ] \
+  || die "gate: bundled yt-dlp reports $bundled_tag but bin/yt-dlp-version says $(cat "$BIN/yt-dlp-version")"
 gate_run "$BIN/deno" --version
 gate_run "$BIN/ffmpeg" -version
 gate_run "$BIN/ffprobe" -version
