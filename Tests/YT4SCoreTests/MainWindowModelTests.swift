@@ -46,11 +46,11 @@ import Testing
         let fake = try FakeYtDlp()
         let model = model(fake)
         model.options.quality = .p720
-        model.pasteText = "https://youtu.be/first"
+        model.pasteText = "https://youtu.be/dQw4w9WgXcQ"
         model.download()
 
         model.options.format = .mp3
-        model.pasteText = "https://youtu.be/second"
+        model.pasteText = "https://youtu.be/jNQXAC9IVRw"
         model.download()
 
         #expect(model.queue.items.map(\.request.options.format) == [.video, .mp3])
