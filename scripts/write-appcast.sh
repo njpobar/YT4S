@@ -7,7 +7,7 @@
 # sign_update reads the private key from the login Keychain. YT4S_SPARKLE_BIN overrides where
 # sign_update lives (tests and local update checks point it at a wrapper using a throwaway key).
 set -euo pipefail
-source "$(dirname "$0")/lib/deps.sh"
+source "$(dirname "$0")/lib/common.sh"
 source "$(dirname "$0")/lib/sparkle.sh"
 
 [ $# -eq 5 ] || die "usage: scripts/write-appcast.sh <app.zip> <version> <build-number> <download-url> <out.xml>"

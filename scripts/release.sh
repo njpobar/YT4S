@@ -15,14 +15,13 @@
 set -euo pipefail
 # Only the contract gate below runs live tests, against the app this run builds.
 unset YT4S_LIVE_APP
-source "$(dirname "$0")/lib/deps.sh"
+source "$(dirname "$0")/lib/common.sh"
 source "$(dirname "$0")/lib/version.sh"
 source "$(dirname "$0")/lib/sparkle.sh"
 
 APP="$REPO_ROOT/build/YT4S.app"
 DIST_DIR="$REPO_ROOT/dist"
 
-step() { echo "==> $*"; }
 usage() { die "usage: scripts/release.sh [--dry-run] <version>"; }
 
 dry_run=false
@@ -126,7 +125,7 @@ assets=("$zip")
 # releases/latest/download/appcast.xml, so it sees this entry only once the draft is published.
 step "Sparkle signature and appcast.xml"
 "$REPO_ROOT/scripts/write-appcast.sh" "$zip" "$version" "$build" \
-  "https://github.com/njpobar/YT4S/releases/download/$tag/$(basename "$zip")" "$DIST_DIR/appcast.xml"
+  "$GITHUB_REPO_URL/releases/download/$tag/$(basename "$zip")" "$DIST_DIR/appcast.xml"
 assets+=("$DIST_DIR/appcast.xml")
 
 step "Making $(basename "$dmg")"

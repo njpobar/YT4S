@@ -7,6 +7,7 @@
 #
 # Usage: scripts/update-deps.sh <yt-dlp|deno|ffmpeg|ffprobe>
 set -euo pipefail
+source "$(dirname "$0")/lib/common.sh"
 source "$(dirname "$0")/lib/deps.sh"
 
 [ $# -eq 1 ] || die "usage: $0 <$(echo $DEP_NAMES | tr ' ' '|')>"

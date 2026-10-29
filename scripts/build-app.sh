@@ -6,6 +6,7 @@
 #   YT4S_VERSION / YT4S_BUILD_NUMBER override VERSION and the commit count (release.sh sets both).
 #   YT4S_SPARKLE_PUBLIC_KEY / YT4S_FEED_URL: local update tests only (see write-info-plist.sh).
 set -euo pipefail
+source "$(dirname "$0")/lib/common.sh"
 source "$(dirname "$0")/lib/deps.sh"
 source "$(dirname "$0")/lib/version.sh"
 
@@ -15,8 +16,6 @@ CONTENTS="$APP/Contents"
 BIN="$CONTENTS/Resources/bin"
 
 [ "$(uname -m)" = arm64 ] || die "YT4S is Apple Silicon only; build on an arm64 Mac"
-
-step() { echo "==> $*"; }
 
 # ---- 1. Inputs -------------------------------------------------------------------------------
 

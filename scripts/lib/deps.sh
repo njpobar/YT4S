@@ -1,16 +1,10 @@
-# Shared helpers for deps.lock. Source this file; do not execute it.
-# Compatible with macOS /bin/bash 3.2.
+# deps.lock helpers: pinned binaries, fetched and verified into vendor/. Source after
+# lib/common.sh; do not execute. Compatible with macOS /bin/bash 3.2.
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DEPS_LOCK="${YT4S_DEPS_LOCK:-$REPO_ROOT/deps.lock}"
 VENDOR_DIR="${YT4S_VENDOR_DIR:-$REPO_ROOT/vendor}"
 DEPS_CACHE="$VENDOR_DIR/cache"
 DEP_NAMES="yt-dlp deno ffmpeg ffprobe"
-
-die() {
-  echo "error: $*" >&2
-  exit 1
-}
 
 sha256_of() {
   shasum -a 256 "$1" | awk '{print $1}'

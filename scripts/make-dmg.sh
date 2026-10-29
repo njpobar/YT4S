@@ -4,7 +4,7 @@
 #
 # Usage: scripts/make-dmg.sh <path/to/YT4S.app> <out.dmg> [volume name]
 set -euo pipefail
-source "$(dirname "$0")/lib/deps.sh"
+source "$(dirname "$0")/lib/common.sh"
 
 [ $# -ge 2 ] || die "usage: scripts/make-dmg.sh <app> <out.dmg> [volume name]"
 app=$1

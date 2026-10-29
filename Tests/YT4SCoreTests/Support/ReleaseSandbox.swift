@@ -49,7 +49,7 @@ struct ReleaseSandbox {
         let real = Self.repoRoot
         for path in [
             "scripts/release.sh", "scripts/write-appcast.sh",
-            "scripts/lib/deps.sh", "scripts/lib/version.sh", "scripts/lib/sparkle.sh", ".gitignore",
+            "scripts/lib/common.sh", "scripts/lib/version.sh", "scripts/lib/sparkle.sh", ".gitignore",
         ] {
             try fm.copyItem(at: real.appendingPathComponent(path), to: repo.appendingPathComponent(path))
         }

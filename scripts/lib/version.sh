@@ -1,4 +1,4 @@
-# Version and build number helpers. Source after lib/deps.sh; do not execute.
+# Version and build number helpers. Source after lib/common.sh; do not execute.
 # Compatible with macOS /bin/bash 3.2.
 #
 # VERSION (semver X.Y.Z) is the single source of CFBundleShortVersionString.

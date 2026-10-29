@@ -7,7 +7,7 @@
 #
 # Never add LSFileQuarantineEnabled: in-app updates must stay unquarantined (ADR 0002).
 set -euo pipefail
-source "$(dirname "$0")/lib/deps.sh"
+source "$(dirname "$0")/lib/common.sh"
 source "$(dirname "$0")/lib/sparkle.sh"
 
 [ $# -eq 3 ] || die "usage: scripts/write-info-plist.sh <out.plist> <version> <build-number>"

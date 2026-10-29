@@ -1,8 +1,8 @@
 # Sparkle (app self-update) settings shared by build-app.sh and release.sh. Source after
-# lib/deps.sh; do not execute. Compatible with macOS /bin/bash 3.2.
+# lib/common.sh; do not execute. Compatible with macOS /bin/bash 3.2.
 
 # The appcast is a release asset; /releases/latest/ only resolves to published (non-draft) releases.
-SPARKLE_FEED_URL="${YT4S_FEED_URL:-https://github.com/njpobar/YT4S/releases/latest/download/appcast.xml}"
+SPARKLE_FEED_URL="${YT4S_FEED_URL:-$GITHUB_REPO_URL/releases/latest/download/appcast.xml}"
 SPARKLE_PUBLIC_KEY_FILE="$REPO_ROOT/config/sparkle-public-key"
 
 # sparkle_public_key -> the EdDSA public key baked into the app as SUPublicEDKey: YT4S_SPARKLE_PUBLIC_KEY
