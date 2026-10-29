@@ -63,10 +63,22 @@ public struct DownloadFolder: Equatable, Sendable {
         guard setxattr(destination.path, Self.videoIDAttribute, id, id.count, 0, 0) == 0 else {
             throw CocoaError(.fileWriteUnknown, userInfo: [NSFilePathErrorKey: destination.path])
         }
-        // Best effort: leave nothing behind once no download is in progress.
-        if (try? fileManager.contentsOfDirectory(atPath: incompleteFolder.path))?.isEmpty == true {
-            try? fileManager.removeItem(at: incompleteFolder)
-        }
+        removeIncompleteFolderIfEmpty()
         return destination
+    }
+
+    /// Deletes a download that will not be placed (failed or cancelled after yt-dlp wrote it).
+    /// Only ever touches files inside `incompleteFolder`.
+    public func discardIncomplete(_ downloaded: URL) {
+        guard downloaded.deletingLastPathComponent().standardizedFileURL == incompleteFolder.standardizedFileURL else { return }
+        try? FileManager.default.removeItem(at: downloaded)
+        removeIncompleteFolderIfEmpty()
+    }
+
+    /// Best effort: leave nothing behind once no download is in progress.
+    private func removeIncompleteFolderIfEmpty() {
+        if (try? FileManager.default.contentsOfDirectory(atPath: incompleteFolder.path))?.isEmpty == true {
+            try? FileManager.default.removeItem(at: incompleteFolder)
+        }
     }
 }

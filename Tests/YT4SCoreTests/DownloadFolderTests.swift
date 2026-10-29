@@ -74,6 +74,17 @@ import Testing
         #expect(folder.videoID(ofFileAt: again) == "dQw4w9WgXcQ")
     }
 
+    @Test func aDownloadThatWillNotBePlacedIsDiscardedButNothingOutsideTheIncompleteFolder() throws {
+        let saved = try folder.place(try downloaded("aaaaaaaaaaa"), plan: rickPlan, videoID: "aaaaaaaaaaa")
+        let unplaced = try downloaded("bbbbbbbbbbb")
+
+        folder.discardIncomplete(saved)
+        folder.discardIncomplete(unplaced)
+
+        #expect(FileManager.default.fileExists(atPath: saved.path))
+        #expect(!FileManager.default.fileExists(atPath: folder.incompleteFolder.path))
+    }
+
     @Test func videoAndMP3OfOneVideoShareTheFolder() throws {
         try folder.place(try downloaded("dQw4w9WgXcQ", ext: "mp4"), plan: rickPlan, videoID: "dQw4w9WgXcQ")
         let mp3 = try folder.place(try downloaded("dQw4w9WgXcQ", ext: "mp3"), plan: rickPlan, videoID: "dQw4w9WgXcQ")
