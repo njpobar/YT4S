@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 @testable import YT4SCore
 
@@ -7,6 +8,9 @@ import Foundation
 /// Stubbed: `swift` and `gh` (PATH stubs that log their argv), `scripts/build-app.sh` (writes a
 /// tiny unsigned `build/YT4S.app` from the version and build number it is handed) and
 /// `scripts/make-dmg.sh` (hdiutil takes ~10 s; `MakeDmgTests` covers the real one).
+/// Sparkle: `$YT4S_SPARKLE_BIN/sign_update` is the real one, handed a throwaway EdDSA key file
+/// (never the login Keychain); `generate_keys -p` is a stub that prints that key's public half
+/// (`YT4S_STUB_KEYCHAIN_KEY` overrides it, `YT4S_STUB_NO_KEYCHAIN_KEY=1` makes the Keychain empty).
 /// Real: git (against the local bare remote), ditto, plutil.
 struct ReleaseSandbox {
     static let repoRoot = URL(fileURLWithPath: #filePath)
@@ -19,9 +23,14 @@ struct ReleaseSandbox {
     let stubBin: URL
     let ghLog: URL
     let swiftLog: URL
+    let sparkleBin: URL
+    /// The throwaway signing key; its public half is committed as config/sparkle-public-key.
+    let signingKey = Curve25519.Signing.PrivateKey()
+    var publicKey: String { signingKey.publicKey.rawRepresentation.base64EncodedString() }
 
     /// - Parameter version: contents of the sandbox's committed `VERSION` file.
-    init(version: String = "0.1.0") async throws {
+    /// - Parameter configuredKey: committed config/sparkle-public-key value; default the test key's.
+    init(version: String = "0.1.0", configuredKey: String? = nil) async throws {
         root = FileManager.default.temporaryDirectory
             .appendingPathComponent("yt4s-release-\(UUID().uuidString)", isDirectory: true)
         repo = root.appendingPathComponent("repo", isDirectory: true)
@@ -29,13 +38,19 @@ struct ReleaseSandbox {
         stubBin = root.appendingPathComponent("stub-bin", isDirectory: true)
         ghLog = root.appendingPathComponent("gh.log")
         swiftLog = root.appendingPathComponent("swift.log")
+        sparkleBin = root.appendingPathComponent("sparkle-bin", isDirectory: true)
 
         let fm = FileManager.default
         try fm.createDirectory(at: repo.appendingPathComponent("scripts/lib"), withIntermediateDirectories: true)
         try fm.createDirectory(at: stubBin, withIntermediateDirectories: true)
+        try fm.createDirectory(at: sparkleBin, withIntermediateDirectories: true)
+        try fm.createDirectory(at: repo.appendingPathComponent("config"), withIntermediateDirectories: true)
 
         let real = Self.repoRoot
-        for path in ["scripts/release.sh","scripts/lib/deps.sh", "scripts/lib/version.sh", ".gitignore"] {
+        for path in [
+            "scripts/release.sh", "scripts/write-appcast.sh",
+            "scripts/lib/deps.sh", "scripts/lib/version.sh", "scripts/lib/sparkle.sh", ".gitignore",
+        ] {
             try fm.copyItem(at: real.appendingPathComponent(path), to: repo.appendingPathComponent(path))
         }
         try write("\(version)\n", to: repo.appendingPathComponent("VERSION"))
@@ -43,6 +58,12 @@ struct ReleaseSandbox {
         try write(Self.makeDmgStub, to: repo.appendingPathComponent("scripts/make-dmg.sh"), executable: true)
         try write(Self.logStub(log: "YT4S_STUB_SWIFT_LOG", exit: "YT4S_STUB_SWIFT_EXIT"), to: stubBin.appendingPathComponent("swift"), executable: true)
         try write(Self.logStub(log: "YT4S_STUB_GH_LOG", exit: "YT4S_STUB_GH_EXIT"), to: stubBin.appendingPathComponent("gh"), executable: true)
+
+        let keyFile = root.appendingPathComponent("sparkle-private-key")
+        try write(signingKey.rawRepresentation.base64EncodedString(), to: keyFile)
+        try write("# test key\n\(configuredKey ?? publicKey)\n", to: repo.appendingPathComponent("config/sparkle-public-key"))
+        try write(Self.signUpdateWrapper(keyFile: keyFile), to: sparkleBin.appendingPathComponent("sign_update"), executable: true)
+        try write(Self.generateKeysStub(publicKey: publicKey), to: sparkleBin.appendingPathComponent("generate_keys"), executable: true)
 
         try await shell("""
             set -e
@@ -69,6 +90,7 @@ struct ReleaseSandbox {
         env["PATH"] = "\(stubBin.path):/usr/bin:/bin:/usr/sbin:/sbin"
         env["YT4S_STUB_GH_LOG"] = ghLog.path
         env["YT4S_STUB_SWIFT_LOG"] = swiftLog.path
+        env["YT4S_SPARKLE_BIN"] = sparkleBin.path
         env["GIT_AUTHOR_NAME"] = "Test"
         env["GIT_AUTHOR_EMAIL"] = "test@example.invalid"
         env["GIT_COMMITTER_NAME"] = "Test"
@@ -117,6 +139,30 @@ struct ReleaseSandbox {
         #!/bin/bash
         { printf '%s\\0' "$@"; printf '\\001'; } >> "$\(log)"
         exit "${\(exit):-0}"
+        """
+    }
+
+    /// Sparkle's SwiftPM artifact in this checkout (resolved by `swift test`).
+    static let realSparkleBin = repoRoot.appendingPathComponent(".build/artifacts/sparkle/Sparkle/bin")
+
+    /// The real sign_update, always with the throwaway key file instead of the Keychain.
+    private static func signUpdateWrapper(keyFile: URL) -> String {
+        """
+        #!/bin/bash
+        exec "\(realSparkleBin.path)/sign_update" --ed-key-file "\(keyFile.path)" "$@"
+        """
+    }
+
+    /// `generate_keys -p` as if the login Keychain held the sandbox key (or none, or another).
+    private static func generateKeysStub(publicKey: String) -> String {
+        """
+        #!/bin/bash
+        [ "$*" = "-p" ] || { echo "stub generate_keys only supports -p, got: $*" >&2; exit 64; }
+        if [ "${YT4S_STUB_NO_KEYCHAIN_KEY:-}" = 1 ]; then
+          echo "ERROR! There is no existing EdDSA key in your keychain." >&2
+          exit 1
+        fi
+        echo "${YT4S_STUB_KEYCHAIN_KEY:-\(publicKey)}"
         """
     }
 
