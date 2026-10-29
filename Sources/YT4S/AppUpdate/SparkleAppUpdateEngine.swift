@@ -1,4 +1,5 @@
 import AppKit
+import os
 import Sparkle
 import YT4SCore
 
@@ -10,6 +11,8 @@ import YT4SCore
 ///   with "install": no update prompt, no release notes, no "relaunch now?" alert. Sparkle then
 ///   verifies the EdDSA signature, swaps the bundle, and relaunches.
 @MainActor final class SparkleAppUpdateEngine: NSObject, AppUpdateEngine {
+    private static let log = Logger(subsystem: "com.njpobar.YT4S", category: "AppUpdate")
+
     var onEvent: (@MainActor (AppUpdateEvent) -> Void)?
 
     private var updater: SPUUpdater?
@@ -24,7 +27,7 @@ import YT4SCore
             try updater.start()
             self.updater = updater
         } catch {
-            NSLog("YT4S: app updates are off: %@", error.localizedDescription)
+            Self.log.error("App updates are off: \(Self.describe(error), privacy: .public)")
         }
     }
 
@@ -40,6 +43,17 @@ import YT4SCore
         }
         installing = true
         updater.checkForUpdates()
+    }
+
+    /// "domain code: message", then the same for each underlying error.
+    private static func describe(_ error: any Error) -> String {
+        var parts: [String] = []
+        var next: NSError? = error as NSError
+        while let error = next {
+            parts.append("\(error.domain) \(error.code): \(error.localizedDescription)")
+            next = error.userInfo[NSUnderlyingErrorKey] as? NSError
+        }
+        return parts.joined(separator: " <- ")
     }
 
     private func finishInstall(_ event: AppUpdateEvent) {
@@ -62,10 +76,12 @@ extension SparkleAppUpdateEngine: @preconcurrency SPUUpdaterDelegate {
         onEvent?(.upToDate)
     }
 
-    func updater(_ updater: SPUUpdater, didAbortWithError error: any Error) {
-        guard !installing else { return }
-        let error = error as NSError
+    /// Only background probes report failures here; an install's failure comes through
+    /// `showUpdaterError` (this callback also fires after it, for the same error).
+    func updater(_ updater: SPUUpdater, didFinishUpdateCycleFor updateCheck: SPUUpdateCheck, error: (any Error)?) {
+        guard updateCheck == .updateInformation, let error = error as NSError? else { return }
         if error.domain == SUSparkleErrorDomain, error.code == Int(SUError.noUpdateError.rawValue) { return }
+        Self.log.notice("Background update check failed: \(Self.describe(error), privacy: .public)")
         onEvent?(.failed(AppUpdateFailure(sparkleError: error)))
     }
 }
@@ -94,7 +110,7 @@ extension SparkleAppUpdateEngine: @preconcurrency SPUUserDriver {
     }
 
     func showUpdaterError(_ error: any Error, acknowledgement: @escaping () -> Void) {
-        NSLog("YT4S: app update failed: %@", String(describing: error))
+        Self.log.error("App update failed: \(Self.describe(error), privacy: .public)")
         acknowledgement()
         finishInstall(.failed(AppUpdateFailure(sparkleError: error)))
     }

@@ -10,10 +10,10 @@ public enum AppUpdateFailure: Sendable, Equatable {
 
     /// Classifies an error Sparkle reported (domain `SUSparkleErrorDomain`, codes from SUErrors.h).
     public init(sparkleError error: Error) {
-        let error = error as NSError
-        if Self.hasURLError(error) {
+        let chain = Self.chain(error as NSError)
+        if chain.contains(where: { $0.domain == NSURLErrorDomain }) {
             self = .offline
-        } else if error.domain == Self.sparkleDomain, Self.signatureCodes.contains(error.code) {
+        } else if chain.contains(where: { $0.domain == Self.sparkleDomain && Self.signatureCodes.contains($0.code) }) {
             self = .badSignature
         } else {
             self = .other
@@ -24,10 +24,10 @@ public enum AppUpdateFailure: Sendable, Equatable {
     /// SUSignatureError, SUValidationError.
     private static let signatureCodes: Set<Int> = [3001, 3002]
 
-    private static func hasURLError(_ error: NSError) -> Bool {
-        if error.domain == NSURLErrorDomain { return true }
-        guard let underlying = error.userInfo[NSUnderlyingErrorKey] as? NSError else { return false }
-        return hasURLError(underlying)
+    /// The error and its NSUnderlyingError chain, outermost first.
+    private static func chain(_ error: NSError) -> [NSError] {
+        guard let underlying = error.userInfo[NSUnderlyingErrorKey] as? NSError else { return [error] }
+        return [error] + chain(underlying)
     }
 
     /// The plain two-line footer explanation.

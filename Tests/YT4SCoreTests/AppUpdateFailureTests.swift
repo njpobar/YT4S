@@ -24,6 +24,10 @@ import Testing
         #expect(AppUpdateFailure(sparkleError: sparkle(code)) == .badSignature)
     }
 
+    @Test func aSignatureErrorWrappedInAnInstallErrorIsABadSignature() {
+        #expect(AppUpdateFailure(sparkleError: sparkle(4005, underlying: sparkle(3002))) == .badSignature)
+    }
+
     @Test(arguments: [1000, 3000, 4000, 4005])
     func anythingElseIsAPlainFailure(code: Int) {
         #expect(AppUpdateFailure(sparkleError: sparkle(code)) == .other)
