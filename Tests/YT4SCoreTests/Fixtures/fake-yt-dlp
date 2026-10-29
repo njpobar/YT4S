@@ -62,7 +62,7 @@ while (( $# )); do
   case $arg in
     --version) print -r -- "${YT4S_FAKE_VERSION:-2026.10.21}"; exit 0 ;;
     --ignore-config|--no-update|--newline|--no-progress|--progress|--no-warnings|--no-playlist|--yes-playlist \
-      |--embed-thumbnail|--embed-metadata|--no-embed-thumbnail|--no-embed-metadata|--force-overwrites|--no-overwrites \
+      |--embed-thumbnail|--embed-metadata|--no-embed-thumbnail|--no-embed-metadata|--embed-chapters|--no-embed-chapters|--force-overwrites|--no-overwrites \
       |--no-part|--restrict-filenames|--windows-filenames|--no-mtime|--no-color|--ignore-errors|--abort-on-error \
       |--no-abort-on-error|--flat-playlist|--no-flat-playlist|--no-cache-dir|--no-colors)
       seen[$arg]=1 ;;

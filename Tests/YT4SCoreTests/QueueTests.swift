@@ -44,6 +44,35 @@ import Testing
         #expect(FileManager.default.fileExists(atPath: file.path))
     }
 
+    @Test(arguments: QualityPreset.allCases)
+    func everyVideoPresetDownloadsAnMP4(quality: QualityPreset) async throws {
+        let fake = try FakeYtDlp()
+        let queue = Queue(runner: fake.runner(scenario: "success"))
+        var request = request(fake)
+        request.options.quality = quality
+
+        queue.add(request)
+        await queue.waitUntilIdle()
+
+        #expect(queue.items[0].state == .finished(file: fake.downloadFolder.appendingPathComponent("Fake Video abc123.mp4")))
+        #expect(queue.items[0].request.options.quality == quality)
+    }
+
+    @Test func anMP3ItemFinishesWithAnMP3File() async throws {
+        let fake = try FakeYtDlp()
+        let queue = Queue(runner: fake.runner(scenario: "success"))
+        var request = request(fake)
+        request.options.format = .mp3
+
+        queue.add(request)
+        await queue.waitUntilIdle()
+
+        let file = fake.downloadFolder.appendingPathComponent("Fake Video abc123.mp3")
+        #expect(queue.items[0].state == .finished(file: file))
+        #expect(FileManager.default.fileExists(atPath: file.path))
+        #expect(queue.items[0].request.options.format == .mp3)
+    }
+
     @Test func aRunningDownloadShowsLiveProgress() async throws {
         let fake = try FakeYtDlp()
         let queue = Queue(runner: fake.runner(scenario: "slow", extraEnvironment: ["YT4S_FAKE_STEP_DELAY": "0.2"]))

@@ -39,6 +39,26 @@ import Testing
         #expect(model.pasteText == "")
     }
 
+    @Test func eachQueuedItemKeepsTheFormatAndQualityChosenWhenItWasAdded() throws {
+        let fake = try FakeYtDlp()
+        let model = model(fake)
+        model.options.quality = .p720
+        model.pasteText = "https://youtu.be/first"
+        model.download()
+
+        model.options.format = .mp3
+        model.pasteText = "https://youtu.be/second"
+        model.download()
+
+        #expect(model.queue.items.map(\.request.options.format) == [.video, .mp3])
+        #expect(model.queue.items.map(\.request.options.quality) == [.p720, .p720])
+    }
+
+    @Test func theQualityPresetOnlyAppliesToVideo() {
+        #expect(Format.video.usesQualityPreset)
+        #expect(!Format.mp3.usesQualityPreset)
+    }
+
     @Test func firstDownloadCreatesTheDownloadFolder() async throws {
         let fake = try FakeYtDlp()
         let folder = fake.downloadFolder.appendingPathComponent("YT4S", isDirectory: true)

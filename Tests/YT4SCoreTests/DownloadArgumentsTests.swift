@@ -21,11 +21,69 @@ import Testing
         #expect(argv.containsSequence(["-o", "%(title)s.%(ext)s"]))
     }
 
-    @Test func videoBestPicksTheBestStreamsAndMergesToMP4() {
-        let argv = DownloadArguments.arguments(for: request)
+    private func arguments(_ format: Format, _ quality: QualityPreset = .best) -> [String] {
+        var request = request
+        request.options.format = format
+        request.options.quality = quality
+        return DownloadArguments.arguments(for: request)
+    }
+
+    // Every Video preset prefers QuickTime-playable H.264 + AAC (M1 cannot hardware-decode AV1,
+    // QuickTime cannot play VP9 / Opus), falls back to any codec, and merges into an MP4.
+    private let quickTimeFriendlySort = ["-S", "vcodec:h264,res,acodec:aac"]
+
+    @Test func videoBestPrefersH264AndAACAtTheHighestResolution() {
+        let argv = arguments(.video, .best)
 
         #expect(argv.containsSequence(["-f", "bv*+ba/b"]))
+        #expect(argv.containsSequence(quickTimeFriendlySort))
         #expect(argv.containsSequence(["--merge-output-format", "mp4"]))
+    }
+
+    @Test func video1080pCapsHeightAndFallsBackBelowTheCap() {
+        let argv = arguments(.video, .p1080)
+
+        #expect(argv.containsSequence(["-f", "bv*[height<=1080]+ba/b[height<=1080]/bv*+ba/b"]))
+        #expect(argv.containsSequence(quickTimeFriendlySort))
+        #expect(argv.containsSequence(["--merge-output-format", "mp4"]))
+    }
+
+    @Test func video720pCapsHeightAndFallsBackBelowTheCap() {
+        let argv = arguments(.video, .p720)
+
+        #expect(argv.containsSequence(["-f", "bv*[height<=720]+ba/b[height<=720]/bv*+ba/b"]))
+        #expect(argv.containsSequence(quickTimeFriendlySort))
+        #expect(argv.containsSequence(["--merge-output-format", "mp4"]))
+    }
+
+    @Test func videoDoesNotExtractAudio() {
+        #expect(!arguments(.video).contains("-x"))
+    }
+
+    @Test func mp3Is320kbpsWithCoverArtAndMetadata() {
+        let argv = arguments(.mp3)
+
+        #expect(argv.containsSequence(["-f", "ba/b"]))
+        #expect(argv.containsSequence(["-x", "--audio-format", "mp3", "--audio-quality", "320K"]))
+        #expect(argv.containsSequence(["--embed-thumbnail", "--convert-thumbnails", "jpg"]))
+        #expect(argv.contains("--embed-metadata"))
+        #expect(!argv.contains("--merge-output-format"))
+    }
+
+    @Test func mp3IgnoresTheQualityPreset() {
+        #expect(arguments(.mp3, .p720) == arguments(.mp3, .best))
+    }
+
+    @Test func neverAddsSubtitlesChaptersOrSponsorBlock() {
+        for format in Format.allCases {
+            for quality in QualityPreset.allCases {
+                let argv = arguments(format, quality)
+                #expect(!argv.contains { $0.contains("sub") || $0.contains("sponsorblock") || $0 == "--embed-chapters" })
+                #expect(!argv.contains("--split-chapters"))
+            }
+        }
+        // --embed-metadata would also embed chapters unless told not to.
+        #expect(arguments(.mp3).contains("--no-embed-chapters"))
     }
 
     @Test func readsProgressAndMetadataOnlyThroughYT4STemplates() {
