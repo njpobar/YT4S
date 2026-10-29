@@ -268,7 +268,7 @@ private struct QueueView: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                     Spacer()
-                    if summary.retryableFailures >= 2 {
+                    if summary.showsRetryAllFailed {
                         Button("Retry all failed") { queue.retryAllFailed() }
                             .controlSize(.small)
                     }

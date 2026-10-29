@@ -9,8 +9,7 @@ public struct QueueSummary: Equatable, Sendable {
     public var failed = 0
     public var cancelled = 0
     public var notStarted = 0
-    /// Failed rows that Retry can help, plus Not started rows (Retry all failed resumes them);
-    /// "Retry all failed" shows when there are 2 or more.
+    /// Failed rows that Retry can help, plus Not started rows (Retry all failed resumes them).
     public var retryableFailures = 0
     /// Whether "Clear finished" has anything to remove.
     public var hasFinished: Bool
@@ -32,6 +31,9 @@ public struct QueueSummary: Equatable, Sendable {
             }
         }
     }
+
+    /// Whether the header offers "Retry all failed": any row it would retry.
+    public var showsRetryAllFailed: Bool { retryableFailures > 0 }
 
     /// Non-zero counts only, what is still going first; empty for an empty Queue.
     public var text: String {

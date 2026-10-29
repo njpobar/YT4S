@@ -35,6 +35,16 @@ import Testing
         #expect(summary.text == "3 active, 1 downloaded, 1 cancelled")
     }
 
+    @Test func offersRetryAllFailedForASingleRetryableFailure() {
+        #expect(QueueSummary(items([.finished(file: file), failure])).showsRetryAllFailed)
+        #expect(QueueSummary(items([.notStarted])).showsRetryAllFailed)
+    }
+
+    @Test func doesNotOfferRetryAllFailedWithoutRetryableFailures() {
+        let unavailable = QueueItemState.failed(DownloadFailure(termination: .exited(1), details: "ERROR: Video unavailable"))
+        #expect(!QueueSummary(items([.finished(file: file), .cancelled, unavailable])).showsRetryAllFailed)
+    }
+
     @Test func isEmptyForAnEmptyQueue() {
         #expect(QueueSummary([]).text == "")
     }
