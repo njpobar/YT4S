@@ -56,7 +56,7 @@ struct ReleaseSandbox {
         try write("\(version)\n", to: repo.appendingPathComponent("VERSION"))
         try write(Self.buildAppStub, to: repo.appendingPathComponent("scripts/build-app.sh"), executable: true)
         try write(Self.makeDmgStub, to: repo.appendingPathComponent("scripts/make-dmg.sh"), executable: true)
-        try write(Self.logStub(log: "YT4S_STUB_SWIFT_LOG", exit: "YT4S_STUB_SWIFT_EXIT"), to: stubBin.appendingPathComponent("swift"), executable: true)
+        try write(Self.swiftStub, to: stubBin.appendingPathComponent("swift"), executable: true)
         try write(Self.logStub(log: "YT4S_STUB_GH_LOG", exit: "YT4S_STUB_GH_EXIT"), to: stubBin.appendingPathComponent("gh"), executable: true)
 
         let keyFile = root.appendingPathComponent("sparkle-private-key")
@@ -87,6 +87,7 @@ struct ReleaseSandbox {
     @discardableResult
     func shell(_ script: String, environment: [String: String] = [:]) async throws -> SubprocessResult {
         var env = ProcessInfo.processInfo.environment
+        env[LiveTests.variable] = nil
         env["PATH"] = "\(stubBin.path):/usr/bin:/bin:/usr/sbin:/sbin"
         env["YT4S_STUB_GH_LOG"] = ghLog.path
         env["YT4S_STUB_SWIFT_LOG"] = swiftLog.path
@@ -141,6 +142,36 @@ struct ReleaseSandbox {
         exit "${\(exit):-0}"
         """
     }
+
+    /// `swift`: logs argv like `logStub`, prefixed with `YT4S_LIVE_APP=<value>` when that is set
+    /// (the live contract test run). That run fails with 66 if the app is not built yet, else
+    /// writes its `--xunit-output` report (two tests; `YT4S_STUB_LIVE_TEST_RESULT=skipped|none`
+    /// for a skipped or empty run) and exits with $YT4S_STUB_LIVE_TEST_EXIT.
+    /// Every other run exits with $YT4S_STUB_SWIFT_EXIT.
+    private static let swiftStub = """
+        #!/bin/bash
+        {
+          [ -z "${YT4S_LIVE_APP:-}" ] || printf 'YT4S_LIVE_APP=%s\\0' "$YT4S_LIVE_APP"
+          printf '%s\\0' "$@"; printf '\\001'
+        } >> "$YT4S_STUB_SWIFT_LOG"
+        if [ -n "${YT4S_LIVE_APP:-}" ]; then
+          [ -d "$YT4S_LIVE_APP" ] || { echo "stub swift: no app at $YT4S_LIVE_APP" >&2; exit 66; }
+          while [ $# -gt 0 ] && [ "$1" != --xunit-output ]; do shift; done
+          if [ $# -gt 1 ]; then
+            case "${YT4S_STUB_LIVE_TEST_RESULT:-ran}" in
+              ran) result='' ;;
+              skipped) result='<skipped>not enabled</skipped>' ;;
+            esac
+            if [ "${YT4S_STUB_LIVE_TEST_RESULT:-}" = none ]; then
+              printf '<testsuites><testsuite tests="0"></testsuite></testsuites>' > "$2"
+            else
+              printf '<testsuites><testsuite><testcase name="video()">%s</testcase><testcase name="mp3()">%s</testcase></testsuite></testsuites>' "$result" "$result" > "$2"
+            fi
+          fi
+          exit "${YT4S_STUB_LIVE_TEST_EXIT:-0}"
+        fi
+        exit "${YT4S_STUB_SWIFT_EXIT:-0}"
+        """
 
     /// Sparkle's SwiftPM artifact in this checkout (resolved by `swift test`).
     static let realSparkleBin = repoRoot.appendingPathComponent(".build/artifacts/sparkle/Sparkle/bin")

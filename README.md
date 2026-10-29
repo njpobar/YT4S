@@ -50,6 +50,16 @@ swift test
 
 Tests are offline: they drive `Tests/YT4SCoreTests/Fixtures/fake-yt-dlp`, whose behaviour is picked by `YT4S_FAKE_SCENARIO` (see the header of that script).
 
+Live tests (`Live*Tests`: real YouTube and GitHub, the tools bundled in a built app) are skipped unless `YT4S_LIVE_APP` names a built `YT4S.app`:
+
+```sh
+scripts/build-app.sh
+YT4S_LIVE_APP=build/YT4S.app swift test --filter LiveContractTests   # ~30 s, the release gate
+YT4S_LIVE_APP=build/YT4S.app swift test --filter Live                # all of them, a few minutes
+```
+
+`LiveContractTests` downloads one short, stable video as Video and as MP3 through the real Queue, and checks the `YT4S-` output lines (progress template included), the placed files, their `com.yt4s.videoid` / `com.yt4s.format` xattrs, and (with the bundled `ffprobe`) the codecs and the MP3's embedded cover art.
+
 ## Build the app
 
 ```sh
@@ -80,7 +90,7 @@ scripts/release.sh 1.2.3
 Run it on a clean `main` that matches `origin/main`, signed in to `gh`.
 The version must be semver and newer than the last `vX.Y.Z` tag.
 It first checks that the Sparkle signing key in your login Keychain matches `config/sparkle-public-key`, so a release can never ship an update installed apps would reject.
-It runs `swift test`, the live contract test (still a stub until #32), then `scripts/build-app.sh` (build, sign, post-signing smoke gate), and writes `dist/YT4S-1.2.3.zip`, `dist/appcast.xml` and `dist/YT4S-1.2.3.dmg`.
+It runs `swift test`, then `scripts/build-app.sh` (build, sign, post-signing smoke gate), then `LiveContractTests` against the yt-dlp and ffmpeg inside the app it just built (aborting the release if they fail), and writes `dist/YT4S-1.2.3.zip`, `dist/appcast.xml` and `dist/YT4S-1.2.3.dmg`.
 `scripts/write-appcast.sh` EdDSA-signs the zip with Sparkle's `sign_update` (key from the Keychain) and writes a single-entry appcast (no deltas) pointing at the zip on the `v1.2.3` release.
 It then prints the manual checklist (fresh DMG install + Open Anyway; app update from the previous release; yt-dlp update + rollback; playlist and channel runs with Cancel and Retry) and waits for you to type the version.
 Only then does it commit the `VERSION` bump (if `VERSION` differs), tag `v1.2.3`, push `main` and the tag together, and create a **draft** GitHub Release with the zip, `appcast.xml` and the DMG.

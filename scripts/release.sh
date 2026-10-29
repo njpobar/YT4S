@@ -4,7 +4,8 @@
 # Usage: scripts/release.sh [--dry-run] <version>
 #
 #   1. Preflight: semver newer than the last release, clean tree on main, in sync with origin.
-#   2. Gates: swift test, live contract test (#32), build + sign + post-signing smoke gate.
+#   2. Gates: swift test, build + sign + post-signing smoke gate, then the live contract test
+#      against the yt-dlp + ffmpeg inside the built app (downloads one video from YouTube).
 #   3. Package: dist/YT4S-<version>.zip, its EdDSA-signed dist/appcast.xml, dist/YT4S-<version>.dmg.
 #   4. Manual checklist: Nick confirms by typing the version.
 #   5. Publish: commit the VERSION bump (if any), tag v<version>, push main + tag atomically,
@@ -12,6 +13,8 @@
 #
 # --dry-run runs 1 to 3 and prints what 4 and 5 would do, without touching git or GitHub.
 set -euo pipefail
+# Only the contract gate below runs live tests, against the app this run builds.
+unset YT4S_LIVE_APP
 source "$(dirname "$0")/lib/deps.sh"
 source "$(dirname "$0")/lib/version.sh"
 source "$(dirname "$0")/lib/sparkle.sh"
@@ -85,14 +88,6 @@ echo "    login Keychain key matches config/sparkle-public-key"
 step "Gate: swift test"
 swift test --package-path "$REPO_ROOT"
 
-# Hook for #32: run the opt-in live contract test against the real bundled yt-dlp + ffmpeg and
-# abort the release on failure.
-run_live_contract_test() {
-  echo "    SKIPPED: live contract test is not implemented yet (#32)"
-}
-step "Gate: live contract test"
-run_live_contract_test
-
 step "Build, sign, post-signing smoke gate"
 YT4S_VERSION=$version YT4S_BUILD_NUMBER=$build "$REPO_ROOT/scripts/build-app.sh"
 
@@ -101,6 +96,20 @@ built_version=$(plutil -extract CFBundleShortVersionString raw "$plist")
 built_build=$(plutil -extract CFBundleVersion raw "$plist")
 [ "$built_version" = "$version" ] && [ "$built_build" = "$build" ] \
   || die "built app is $built_version ($built_build), expected $version ($build)"
+
+# The exact yt-dlp + ffmpeg being shipped still honor the contract the app relies on
+# (Tests/YT4SCoreTests/LiveContractTests.swift): one real Video and MP3 download.
+step "Gate: live contract test against the built app"
+contract_report="$REPO_ROOT/build/live-contract-tests.xml"
+rm -f "$contract_report"
+YT4S_LIVE_APP=$APP swift test --package-path "$REPO_ROOT" --filter LiveContractTests --xunit-output "$contract_report" \
+  || die "live contract test failed; the bundled yt-dlp or ffmpeg no longer does what YT4S expects"
+# A renamed suite or a skip passes with nothing run; the gate only counts if every test ran.
+ran=$(xmllint --xpath 'count(//testcase[not(skipped)])' "$contract_report" 2> /dev/null || echo 0)
+skipped=$(xmllint --xpath 'count(//testcase[skipped])' "$contract_report" 2> /dev/null || echo 0)
+[ "$ran" -gt 0 ] && [ "$skipped" = 0 ] \
+  || die "live contract test did not run (ran $ran, skipped $skipped); see $contract_report"
+echo "    $ran live contract tests passed"
 
 # ---- 3. Package ------------------------------------------------------------------------------
 
