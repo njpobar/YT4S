@@ -3,7 +3,7 @@ import YT4SCore
 
 /// The one-column main window (prototype variant A, issue #9), top to bottom: Looks-outdated
 /// banner (when shown), paste box, Format row, Naming pattern row, Download folder + Download
-/// button, Queue, update footer.
+/// button, Queue, update footer, tagline.
 struct MainWindow: View {
     @Bindable var model: MainWindowModel
     let ytDlpUpdates: YtDlpUpdateModel
@@ -66,6 +66,11 @@ struct MainWindow: View {
             Divider()
                 .padding(.vertical, 10)
             UpdateFooter(ytDlp: ytDlpUpdates, app: appUpdate, highlightsUpdateYtDlp: model.queue.showsOutdatedBanner)
+            Text("“Nick is so handsome”")
+                .font(.caption2.italic())
+                .foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .padding(.top, 8)
         }
         .padding(18)
         .frame(minWidth: 560, minHeight: 640)
