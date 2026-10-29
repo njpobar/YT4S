@@ -128,4 +128,60 @@ import Testing
         }
         #expect(failure.termination == nil)
     }
+
+    // MARK: - Queue controls (#22)
+
+    private func isRunning(_ item: QueueItem) -> Bool {
+        if case .running = item.state { true } else { false }
+    }
+
+    /// Every file under `folder`, recursively, as paths relative to it.
+    private func files(in folder: URL) -> [String] {
+        (FileManager.default.subpaths(atPath: folder.path) ?? []).filter { path in
+            var isDirectory: ObjCBool = false
+            FileManager.default.fileExists(atPath: folder.appendingPathComponent(path).path, isDirectory: &isDirectory)
+            return !isDirectory.boolValue
+        }
+    }
+
+    @Test func cancellingARunningVideoStopsItAndLeavesNoPartialFiles() async throws {
+        let fake = try FakeYtDlp()
+        let partials = fake.downloadFolder.deletingLastPathComponent().appendingPathComponent("partial")
+        let queue = Queue(
+            runner: fake.runner(scenario: "slow", extraEnvironment: ["YT4S_FAKE_STEP_DELAY": "0.3"]),
+            partialFilesFolder: partials
+        )
+
+        let id = queue.add(request(fake))
+        try await eventually {
+            if case .running(let progress) = queue.items[0].state { (progress.fraction ?? 0) >= 0.25 } else { false }
+        }
+        #expect(!files(in: partials).isEmpty, "the partial file is written under the partial files folder")
+
+        queue.cancel(id)
+        await queue.waitUntilIdle()
+
+        #expect(queue.items[0].state == .cancelled)
+        #expect(files(in: partials).isEmpty)
+        #expect(files(in: fake.downloadFolder).isEmpty)
+    }
+
+    @Test func cancellingAWaitingVideoSkipsItAndTheQueueCarriesOn() async throws {
+        let fake = try FakeYtDlp()
+        let queue = Queue(runner: fake.runner(scenario: "slow", extraEnvironment: ["YT4S_FAKE_STEP_DELAY": "0.1"]))
+
+        let first = queue.add(request(fake, id: "first"))
+        let second = queue.add(request(fake, id: "second"))
+        queue.add(request(fake, id: "third"))
+        try await eventually { isRunning(queue.items[0]) }
+
+        queue.cancel(second)
+        #expect(queue.items[1].state == .cancelled)
+        queue.cancel(first)
+        await queue.waitUntilIdle()
+
+        #expect(queue.items.map { $0.state == .cancelled } == [true, true, false])
+        #expect(queue.items[2].isFinished)
+        #expect(files(in: fake.downloadFolder) == ["Fake Video third.mp4"])
+    }
 }

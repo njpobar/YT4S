@@ -93,7 +93,7 @@ private struct QueueView: View {
         queue.items.filter {
             switch $0.state {
             case .pending, .running: true
-            case .finished, .failed: false
+            case .finished, .failed, .cancelled: false
             }
         }.count
     }
