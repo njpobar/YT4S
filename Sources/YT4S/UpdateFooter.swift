@@ -7,11 +7,13 @@ import YT4SCore
 struct UpdateFooter: View {
     let ytDlp: YtDlpUpdateModel
     let app: AppUpdateModel
+    /// While the Looks-outdated banner shows, Update yt-dlp stands out so the banner can point at it.
+    var highlightsUpdateYtDlp = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
-                YtDlpUpdateControls(model: ytDlp)
+                YtDlpUpdateControls(model: ytDlp, highlightsUpdate: highlightsUpdateYtDlp)
                 Spacer().frame(width: 10)
                 AppUpdateControls(model: app)
                 Spacer(minLength: 0)
@@ -50,11 +52,12 @@ struct UpdateFooter: View {
 
 private struct YtDlpUpdateControls: View {
     let model: YtDlpUpdateModel
+    let highlightsUpdate: Bool
 
     var body: some View {
         Text(model.versionLabel)
             .monospacedDigit()
-        UpdateButton(title: "Update yt-dlp", showsBadge: model.showsBadge, help: helpText) {
+        UpdateButton(title: "Update yt-dlp", showsBadge: model.showsBadge, highlighted: highlightsUpdate, help: helpText) {
             Task { await model.update() }
         }
         .disabled(!model.canUpdate)
@@ -101,11 +104,12 @@ private struct AppUpdateControls: View {
 private struct UpdateButton: View {
     let title: String
     let showsBadge: Bool
+    var highlighted = false
     let help: String
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
+        let button = Button(action: action) {
             HStack(spacing: 5) {
                 Text(title)
                 if showsBadge {
@@ -115,6 +119,15 @@ private struct UpdateButton: View {
         }
         .controlSize(.small)
         .help(help)
+        // A ring rather than a prominent style: it stays visible while the window is inactive.
+        button.overlay {
+            if highlighted {
+                RoundedRectangle(cornerRadius: 7)
+                    .strokeBorder(Color.orange, lineWidth: 2)
+                    .padding(-3)
+                    .allowsHitTesting(false)
+            }
+        }
     }
 }
 
@@ -154,6 +167,7 @@ extension YT4SApp {
         )
         let queue = Queue(runner: YtDlpRunner(tools: BundledTools(resourcesDirectory: resources), selection: ytDlpUpdates.selection))
         queueBox.queue = queue
+        queue.dismissesOutdatedBanner(whenSwitching: ytDlpUpdates)
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
         let appUpdate = AppUpdateModel(
             engine: SparkleAppUpdateEngine(),
