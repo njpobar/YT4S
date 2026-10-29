@@ -69,7 +69,7 @@ import Testing
         #expect(actions(.pending) == [.cancel])
         #expect(actions(.running(DownloadProgress())) == [.cancel])
         #expect(actions(.finished(file: file)) == [.showInFinder(file)])
-        #expect(actions(.alreadyDownloaded(file: file)) == [.showInFinder(file)])
+        #expect(actions(.alreadyDownloaded(file: file)) == [.downloadAgain, .showInFinder(file)])
         #expect(actions(.failed(DownloadFailure(termination: .exited(1), details: "ERROR: x"))) == [.retry])
         #expect(actions(.cancelled) == [.retry, .remove])
     }

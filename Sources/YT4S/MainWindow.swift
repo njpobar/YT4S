@@ -217,6 +217,7 @@ private struct QueueView: View {
         case .cancel: queue.cancel(id)
         case .retry: queue.retry(id)
         case .remove: queue.remove(id)
+        case .downloadAgain: queue.downloadAgain(id)
         case .showInFinder(let file): NSWorkspace.shared.activateFileViewerSelecting([file])
         }
     }
@@ -276,6 +277,7 @@ private extension QueueRow.Action {
         case .cancel: "Cancel"
         case .retry: "Retry"
         case .remove: "Remove"
+        case .downloadAgain: "Download again"
         case .showInFinder: "Show in Finder"
         }
     }
