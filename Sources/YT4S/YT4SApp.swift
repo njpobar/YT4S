@@ -15,7 +15,8 @@ struct YT4SApp: App {
     // Created once with the App. Not @State: on the macOS 27 SDK @State is a SwiftUI macro whose
     // plugin ships only with Xcode, and this project builds with Command Line Tools.
     private let model = MainWindowModel(
-        queue: Queue(runner: YtDlpRunner(tools: BundledTools(resourcesDirectory: Bundle.main.resourceURL!)))
+        queue: Queue(runner: YtDlpRunner(tools: BundledTools(resourcesDirectory: Bundle.main.resourceURL!))),
+        settings: Settings(defaults: .standard)
     )
 
     init() {
