@@ -3,7 +3,9 @@
 # so the real runner can be pointed at it by injecting this path as the yt-dlp executable.
 #
 # Environment:
-#   YT4S_FAKE_SCENARIO       success (default) | video-failure | network-drop | slow | outdated | crash
+#   YT4S_FAKE_SCENARIO       success (default) | video-failure | network-drop | network-drop-once | slow
+#                            | outdated | crash
+#                            network-drop-once drops only on the first run (needs YT4S_FAKE_RUN_LOG)
 #   YT4S_FAKE_SCENARIO_FILE  if set and the file exists, its contents override YT4S_FAKE_SCENARIO
 #                            (lets a test change the outcome between two runs, e.g. for Retry)
 #   YT4S_FAKE_FAIL_IDS       video-failure: comma-separated video IDs that fail (default: every video)
@@ -13,6 +15,7 @@
 #   YT4S_FAKE_PLAYLIST_IDS   entries for playlist/channel URLs (default p1,p2,p3; empty: no entries)
 #   YT4S_FAKE_PLAYLIST_ERROR if set, listing a playlist/channel fails with this ERROR text (exit 1)
 #   YT4S_FAKE_ARGV_LOG       if set, argv is written there, each element NUL-terminated
+#   YT4S_FAKE_RUN_LOG        if set, one line (the scenario) is appended there per run
 #
 # Contract notes (mirrors real yt-dlp):
 #   - --version prints the version and exits 0.
@@ -39,6 +42,15 @@ step_delay=${YT4S_FAKE_STEP_DELAY:-0}
 
 if [[ -n ${YT4S_FAKE_ARGV_LOG:-} ]]; then
   printf '%s\0' "$@" > "$YT4S_FAKE_ARGV_LOG"
+fi
+
+if [[ -n ${YT4S_FAKE_RUN_LOG:-} ]]; then
+  print -r -- "$scenario" >> "$YT4S_FAKE_RUN_LOG"
+fi
+if [[ $scenario == network-drop-once ]]; then
+  typeset -a runs_so_far
+  [[ -n ${YT4S_FAKE_RUN_LOG:-} ]] && runs_so_far=("${(@f)$(<$YT4S_FAKE_RUN_LOG)}")
+  if (( ${#runs_so_far} > 1 )); then scenario=success; else scenario=network-drop; fi
 fi
 
 case $scenario in

@@ -48,6 +48,14 @@ public struct QueueItem: Identifiable, Equatable, Sendable {
 
     public var isFinished: Bool { if case .finished = state { true } else { false } }
     public var isFailed: Bool { if case .failed = state { true } else { false } }
+    /// What Retry accepts: a cancelled row, or a failure that can succeed again.
+    public var isRetryable: Bool {
+        switch state {
+        case .failed(let failure): failure.category.isRetryable
+        case .cancelled: true
+        case .pending, .running, .finished, .alreadyDownloaded: false
+        }
+    }
     /// Waiting or running: yt-dlp has work left to do for it.
     public var isActive: Bool {
         switch state {
@@ -79,6 +87,8 @@ public final class Queue {
     /// The app posts the batch notification from here when it is in the background.
     @ObservationIgnored public var onBatchFinished: (@MainActor (QueueSummary) -> Void)?
     @ObservationIgnored private let partialFilesFolder: URL
+    /// Wait before the one automatic retry of a Network failure.
+    @ObservationIgnored private let networkRetryDelay: Duration
     @ObservationIgnored private var worker: Task<Void, Never>?
     /// The item yt-dlp is working on, with the task to cancel to stop it.
     @ObservationIgnored private var current: (id: QueueItem.ID, task: Task<Void, Never>)?
@@ -86,9 +96,15 @@ public final class Queue {
     /// - Parameter partialFilesFolder: where yt-dlp keeps unfinished files (`-P temp:`), one
     ///   subfolder per item, so they never show up in the Download folder and Cancel / Retry can
     ///   delete them all.
-    public init(runner: YtDlpRunner, partialFilesFolder: URL = Queue.defaultPartialFilesFolder) {
+    /// - Parameter networkRetryDelay: how long a Network failure waits before its one automatic retry.
+    public init(
+        runner: YtDlpRunner,
+        partialFilesFolder: URL = Queue.defaultPartialFilesFolder,
+        networkRetryDelay: Duration = .seconds(5)
+    ) {
         self.runner = runner
         self.partialFilesFolder = partialFilesFolder
+        self.networkRetryDelay = networkRetryDelay
     }
 
     public nonisolated static var defaultPartialFilesFolder: URL {
@@ -143,11 +159,19 @@ public final class Queue {
 
     /// Re-runs a failed or cancelled item with its original request (Format, Quality preset,
     /// Naming pattern, Download folder), deleting its partial files first. No effect on other states.
+    /// Failures that cannot succeed again (Unavailable, Region-blocked) are left alone too.
     public func retry(_ id: QueueItem.ID) {
-        guard let item = items.first(where: { $0.id == id }), item.isFailed || item.state == .cancelled else { return }
+        guard let item = items.first(where: { $0.id == id }), item.isRetryable else { return }
         deletePartialFiles(partialFilesFolder(for: id))
         update(id) { $0.state = .pending }
         startWorkerIfNeeded()
+    }
+
+    /// Retries every failed row that can succeed again ("Retry all failed"). Cancelled rows stay.
+    public func retryAllFailed() {
+        for item in items where item.isFailed && item.isRetryable {
+            retry(item.id)
+        }
     }
 
     private func startWorkerIfNeeded() {
@@ -169,7 +193,23 @@ public final class Queue {
         }
     }
 
+    /// Runs one item; a Network failure is retried once, after `networkRetryDelay`, before the
+    /// row shows it. The row stays running meanwhile, and Cancel still stops it.
     private func download(_ id: QueueItem.ID) async {
+        await attempt(id)
+        guard case .failed(let failure) = items.first(where: { $0.id == id })?.state,
+              failure.category == .network, !Task.isCancelled else { return }
+        update(id) { $0.state = .running(DownloadProgress()) }
+        do {
+            try await Task.sleep(for: networkRetryDelay)
+        } catch {
+            update(id) { $0.state = .cancelled }
+            return
+        }
+        await attempt(id)
+    }
+
+    private func attempt(_ id: QueueItem.ID) async {
         guard let request = items.first(where: { $0.id == id })?.request else { return }
         var progress = DownloadProgress()
         var file: URL?
