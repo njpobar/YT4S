@@ -92,4 +92,19 @@ import Testing
             for try await _ in runner.run(["--version"]) {}
         }
     }
+
+    @Test func runsWhicheverYtDlpTheUpdaterSelectedAtTheTimeOfEachRun() async throws {
+        let fake = try FakeYtDlp()
+        let missing = YtDlpCopy(version: nil, executable: URL(fileURLWithPath: "/nonexistent/yt-dlp_macos"), origin: .bundled)
+        let selection = YtDlpSelection(missing)
+        let runner = YtDlpRunner(tools: fake.tools, environment: fake.environment(scenario: "success"), selection: selection)
+        let arguments = DownloadArguments.arguments(for: request(fake))
+
+        await #expect(throws: (any Error).self) { _ = try await collect(runner, arguments) }
+
+        // An update installed a new copy while the app is open: the next run uses it.
+        selection.select(YtDlpCopy(version: YtDlpVersion("2026.10.26.220202"), executable: fake.executable, origin: .downloaded))
+        let (_, exit) = try await collect(runner, arguments)
+        #expect(exit?.succeeded == true)
+    }
 }

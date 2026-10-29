@@ -3,9 +3,11 @@ import YT4SCore
 
 /// The one-column main window (prototype variant A, issue #9), top to bottom:
 /// paste box, Format row, [Naming pattern row: later ticket], Download folder + Download button,
-/// Queue, [update footer: later ticket].
+/// Queue, update footer.
 struct MainWindow: View {
     @Bindable var model: MainWindowModel
+    let ytDlpUpdates: YtDlpUpdateModel
+    let appUpdate: AppUpdateModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -50,6 +52,10 @@ struct MainWindow: View {
                 .padding(.bottom, 8)
 
             QueueView(queue: model.queue)
+
+            Divider()
+                .padding(.vertical, 10)
+            UpdateFooter(ytDlp: ytDlpUpdates, app: appUpdate)
         }
         .padding(18)
         .frame(minWidth: 560, minHeight: 640)
