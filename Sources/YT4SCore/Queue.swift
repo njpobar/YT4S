@@ -2,18 +2,18 @@ import Foundation
 import Observation
 
 /// Why a Queue item failed.
-///
-/// A generic placeholder for now: the failure categories ticket adds a category (Unavailable,
-/// Network, Looks outdated, ...) derived from `details` and `termination`, and the row sentence.
 public struct DownloadFailure: Equatable, Sendable {
     /// How yt-dlp ended; `nil` when it could not be launched at all.
     public var termination: SubprocessTermination?
     /// Raw yt-dlp stderr (or the launch error), for the Details disclosure. Never shown in the row.
     public var details: String
+    /// Derived from `details` and `termination`: decides the row sentence and whether Retry helps.
+    public var category: FailureCategory
 
     public init(termination: SubprocessTermination?, details: String) {
         self.termination = termination
         self.details = details
+        category = FailureCategory(stderr: details, termination: termination)
     }
 }
 
