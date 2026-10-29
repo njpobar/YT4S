@@ -10,6 +10,7 @@ struct MainWindow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             PasteBox(text: $model.pasteText)
+            PasteLabels(paste: model.paste, listingMessage: model.listingMessage)
 
             HStack(alignment: .bottom) {
                 VStack(alignment: .leading, spacing: 5) {
