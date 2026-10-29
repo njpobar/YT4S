@@ -47,6 +47,8 @@ ditto "$VENDOR_DIR/yt-dlp" "$BIN/yt-dlp"
 rm -f "$BIN/yt-dlp/.yt4s-sha256"
 cp "$VENDOR_DIR/deno/deno" "$VENDOR_DIR/ffmpeg/ffmpeg" "$VENDOR_DIR/ffprobe/ffprobe" "$BIN/"
 chmod 755 "$BIN/deno" "$BIN/ffmpeg" "$BIN/ffprobe" "$BIN/yt-dlp/yt-dlp_macos"
+# The bundled floor's tag: the app compares it with downloaded copies (BundledYtDlp, ADR 0002).
+lock_field yt-dlp version > "$BIN/yt-dlp-version"
 
 # ffmpeg is GPLv3 (--enable-gpl --enable-version3): ship the license and where to get the source.
 ffmpeg_version=$(lock_field ffmpeg version)
@@ -158,6 +160,9 @@ $output"
 
 step "Gate: bundled tools run from inside the app"
 gate_run "$BIN/yt-dlp/yt-dlp_macos" --version
+bundled_tag=$("$BIN/yt-dlp/yt-dlp_macos" --version)
+[ "$bundled_tag" = "$(cat "$BIN/yt-dlp-version")" ] \
+  || die "gate: bundled yt-dlp reports $bundled_tag but bin/yt-dlp-version says $(cat "$BIN/yt-dlp-version")"
 gate_run "$BIN/deno" --version
 gate_run "$BIN/ffmpeg" -version
 gate_run "$BIN/ffprobe" -version

@@ -71,10 +71,14 @@ import Testing
         let model = model(feed, checkInterval: .milliseconds(20))
 
         await model.launch()
-        try await Task.sleep(for: .milliseconds(200))
+        let checks = { feed.requested.filter { $0 == FakeNightlyFeed.api }.count }
+        let deadline = ContinuousClock.now + .seconds(10)
+        while checks() < 3, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
         model.stop()
 
-        #expect(feed.requested.filter { $0 == FakeNightlyFeed.api }.count >= 3)
+        #expect(checks() >= 3)
     }
 
     @Test func updateInstallsSwitchesDownloadsToItAndClearsTheBadge() async throws {

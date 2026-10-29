@@ -14,13 +14,16 @@ struct YT4SApp: App {
 
     // Created once with the App. Not @State: on the macOS 27 SDK @State is a SwiftUI macro whose
     // plugin ships only with Xcode, and this project builds with Command Line Tools.
-    private let model = MainWindowModel(
-        queue: Queue(runner: YtDlpRunner(tools: BundledTools(resourcesDirectory: Bundle.main.resourceURL!)))
-    )
+    private let model: MainWindowModel
+    private let ytDlpUpdates: YtDlpUpdateModel
+
+    init() {
+        (model, ytDlpUpdates) = Self.makeModels()
+    }
 
     var body: some Scene {
         Window("YT4S", id: "main") {
-            MainWindow(model: model)
+            MainWindow(model: model, ytDlpUpdates: ytDlpUpdates)
         }
         .defaultSize(width: 640, height: 760)
         .windowResizability(.contentMinSize)
