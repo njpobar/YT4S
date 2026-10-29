@@ -48,13 +48,33 @@ public final class MainWindowModel {
         errorMessage = nil
     }
 
-    public var canDownload: Bool { !links.isEmpty }
+    /// The paste box read as Sources, with a live label per line.
+    public var paste: Paste { Paste(pasteText) }
 
-    /// Queues one item per pasted line and clears the paste box.
-    /// The Source detection ticket replaces the line split with real Source detection.
+    public var canDownload: Bool { !paste.sources.isEmpty }
+
+    /// Shown while Playlist and Channel sources are being listed, e.g. "Looking up the videos of 1 playlist...".
+    public var listingMessage: String? {
+        let playlists = listingSources.count { $0.kind == .playlist }
+        let channels = listingSources.count { $0.kind == .channel }
+        let parts = [(playlists, "playlist"), (channels, "channel")]
+            .filter { $0.0 > 0 }
+            .map { "\($0.0) \($0.1)\($0.0 == 1 ? "" : "s")" }
+        return parts.isEmpty ? nil : "Looking up the videos of \(parts.joined(separator: " and "))..."
+    }
+
+    /// Playlist and Channel sources still being listed, in paste order.
+    private var listingSources: [Source] = []
+    @ObservationIgnored private var listing: Task<Void, Never>?
+    @ObservationIgnored private var listingGeneration = 0
+
+    /// Queues one row per video of every pasted Source, in paste order, and clears the paste box
+    /// except for lines that are not YouTube links (never sent to yt-dlp, left there to fix).
+    /// Video links queue at once; Playlist and Channel sources are listed by yt-dlp first.
     public func download() {
-        let links = links
-        guard !links.isEmpty else { return }
+        let paste = paste
+        let sources = paste.sources
+        guard !sources.isEmpty else { return }
         // The folder is created on first Download, never at launch, and recreated if it went
         // missing, but only inside an existing parent. Never falls back to another folder.
         var isDirectory: ObjCBool = false
@@ -67,16 +87,70 @@ public final class MainWindowModel {
             }
         }
         errorMessage = nil
-        for link in links {
-            queue.add(DownloadRequest(url: link, downloadFolder: downloadFolder, options: options))
+        pasteText = paste.invalidText
+
+        let folder = downloadFolder
+        let options = options
+        if listing == nil, sources.allSatisfy({ $0.kind == .video }) {
+            for case .video(let id) in sources {
+                queue.add(DownloadRequest(
+                    url: Source.video(id: id).url, downloadFolder: folder, options: options,
+                    origin: VideoOrigin(sourceKind: .video, videoID: id)
+                ))
+            }
+            return
         }
-        pasteText = ""
+
+        // Listing runs after any earlier batch still being listed, so rows keep paste order.
+        let previous = listing
+        listingSources += sources.filter { $0.kind != .video }
+        listingGeneration += 1
+        let generation = listingGeneration
+        let expander = SourceExpander(runner: queue.runner)
+        listing = Task { [weak self] in
+            await previous?.value
+            for source in sources {
+                let result: Result<[SourceEntry], Error>
+                do {
+                    result = .success(try await expander.expand(source))
+                } catch is CancellationError {
+                    return
+                } catch {
+                    result = .failure(error)
+                }
+                guard let self else { return }
+                self.queueListed(source, result, folder: folder, options: options)
+            }
+            if let self, self.listingGeneration == generation { self.listing = nil }
+        }
     }
 
-    private var links: [String] {
-        pasteText
-            .split(whereSeparator: \.isNewline)
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
+    /// Returns once every pasted Playlist and Channel source has been listed into the Queue.
+    public func waitUntilListed() async {
+        while let listing {
+            await listing.value
+        }
+    }
+
+    private func queueListed(_ source: Source, _ result: Result<[SourceEntry], Error>, folder: URL, options: DownloadOptions) {
+        if source.kind != .video, let index = listingSources.firstIndex(of: source) {
+            listingSources.remove(at: index)
+        }
+        switch result {
+        case .success(let entries):
+            if entries.isEmpty { report("The \(source.kind.rawValue) \(source.url) has no videos.") }
+            for entry in entries {
+                queue.add(DownloadRequest(
+                    url: entry.url, downloadFolder: folder, options: options,
+                    origin: VideoOrigin(source: source, entry: entry)
+                ))
+            }
+        case .failure:
+            report("Couldn't list the videos of the \(source.kind.rawValue) \(source.url). Check the link, or try again later.")
+        }
+    }
+
+    private func report(_ message: String) {
+        errorMessage = [errorMessage, message].compactMap { $0 }.joined(separator: "\n")
     }
 }

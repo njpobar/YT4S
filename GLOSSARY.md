@@ -6,10 +6,11 @@ A personal Mac app for downloading YouTube video or audio without a terminal, us
 
 **Source**:
 What the user pastes in to say what to download: a single video link, a list of links, a channel, or a playlist.
+A video link that also names a playlist (`watch?v=...&list=...`, as copied while playing a playlist or Mix) is a single video; the playlist's own page link is the Playlist source.
 _Avoid_: Input, URL, target
 
 **Channel source**:
-A Source naming a YouTube channel; it means every video on that channel.
+A Source naming a YouTube channel; it means every video on that channel's Videos tab (or its Shorts or Live tab when the link names one).
 _Avoid_: Subscription
 
 **Playlist source**:
