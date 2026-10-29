@@ -17,7 +17,7 @@
 #   - --print [WHEN:]TEMPLATE prints at stage WHEN (default "video") and implies --quiet;
 #     it implies --simulate unless --no-simulate or a stage after "video" is used.
 #   - --progress-template [TYPE:]TEMPLATE (TYPE download by default) prints one stdout line per
-#     progress step, fields under progress.* and info.*.
+#     progress step, fields under progress.* and info.*. Hidden by --quiet unless --progress.
 #   - Errors go to stderr as "ERROR: ..." and the process exits 1 if any video failed.
 # Fake-only guard: real downloads require --ignore-config, --no-update, --ffmpeg-location and
 # --js-runtimes (ADR 0002); missing any of them exits 2 so a regression in the app is caught.
@@ -194,6 +194,8 @@ progress() {  # progress PERCENT STATUS
   info[progress.eta]=$(( (100 - pct) / 10 ))
   info[progress._eta_str]=$(printf '00:%02d' $(( (100 - pct) / 10 )))
   info[progress.filename]=${info[filepath]}
+  # Like real yt-dlp, --quiet (also implied by --print) hides progress unless --progress is given.
+  (( quiet )) && [[ -z ${seen[--progress]:-} ]] && return
   local t
   for t in "${download_templates[@]}"; do print -r -- "$(render "$t")"; done
   (( ${#download_templates} )) || say "[download] $(printf '%5.1f%%' "$pct") of   10.00MiB at    1.00MiB/s ETA 00:00"
