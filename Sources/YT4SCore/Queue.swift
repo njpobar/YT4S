@@ -37,6 +37,9 @@ public struct QueueItem: Identifiable, Equatable, Sendable {
     public var title: String?
     public var videoID: String?
     public var state: QueueItemState
+    /// The file the video will be saved as (Naming pattern + collision rule), predicted once
+    /// yt-dlp has looked the video up and before it downloads; `nil` until then.
+    public var plannedFile: URL?
 
     public init(id: UUID = UUID(), request: DownloadRequest, title: String? = nil, videoID: String? = nil, state: QueueItemState = .pending) {
         self.id = id
@@ -173,11 +176,14 @@ public final class Queue {
         guard let request = items.first(where: { $0.id == id })?.request else { return }
         var progress = DownloadProgress()
         var file: URL?
+        var details: VideoDetails?
+        let downloadFolder = DownloadFolder(url: request.downloadFolder)
         update(id) { $0.state = .running(progress) }
         let partialFiles = partialFilesFolder(for: id)
         deletePartialFiles(partialFiles)
         defer {
             deletePartialFiles(partialFiles)
+            if let file { downloadFolder.discardIncomplete(file) }
             // A cancelled run may end in an error or in nothing at all; only a finish beats Cancel.
             if Task.isCancelled { update(id) { if !$0.isFinished { $0.state = .cancelled } } }
         }
@@ -191,6 +197,13 @@ public final class Queue {
                     switch event {
                     case .video(let info):
                         self.update(id) { $0.title = info.title; $0.videoID = info.id }
+                        details = details ?? VideoDetails(id: info.id, title: info.title)
+                    case .details(let video):
+                        details = video
+                        let planned = downloadFolder.plannedFile(
+                            request.namePlan(for: video), videoID: video.id, fileExtension: request.expectedFileExtension
+                        )
+                        self.update(id) { $0.title = video.title; $0.videoID = video.id; $0.plannedFile = planned }
                     case .file(_, let path):
                         file = URL(fileURLWithPath: path)
                     case .progress, .entry:
@@ -198,12 +211,18 @@ public final class Queue {
                     }
                     self.update(id) { $0.state = .running(progress) }
                 case .exited(let exit):
-                    self.update(id) {
-                        if exit.succeeded, let file {
-                            $0.state = .finished(file: file)
-                        } else {
-                            $0.state = .failed(DownloadFailure(termination: exit.termination, details: exit.stderr))
-                        }
+                    guard exit.succeeded, let downloaded = file else {
+                        self.update(id) { $0.state = .failed(DownloadFailure(termination: exit.termination, details: exit.stderr)) }
+                        break
+                    }
+                    let video = details ?? VideoDetails(id: request.origin.videoID ?? "video", title: request.origin.title ?? "")
+                    do {
+                        // The collision rule is applied again against the folder as it is now.
+                        let placed = try downloadFolder.place(downloaded, plan: request.namePlan(for: video), videoID: video.id)
+                        file = nil
+                        self.update(id) { $0.plannedFile = placed; $0.state = .finished(file: placed) }
+                    } catch {
+                        self.update(id) { $0.state = .failed(DownloadFailure(termination: exit.termination, details: String(describing: error))) }
                     }
                 }
             }

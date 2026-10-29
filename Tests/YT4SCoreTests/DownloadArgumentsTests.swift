@@ -14,11 +14,12 @@ import Testing
         #expect(DownloadOptions.default == DownloadOptions(format: .video, quality: .best, naming: .title))
     }
 
-    @Test func savesIntoTheDownloadFolderNamedByTitle() {
+    @Test func downloadsByVideoIDIntoTheIncompleteFolderAndReportsNamingDetails() {
         let argv = DownloadArguments.arguments(for: request)
 
         #expect(argv.containsSequence(["-P", "/Users/sarah/Downloads/YT4S"]))
-        #expect(argv.containsSequence(["-o", "%(title)s.%(ext)s"]))
+        #expect(argv.containsSequence(["-o", ".yt4s-incomplete/%(id)s.%(ext)s"]))
+        #expect(argv.containsSequence(["--print", YtDlpOutputTemplates.details]))
     }
 
     private func arguments(_ format: Format, _ quality: QualityPreset = .best) -> [String] {
