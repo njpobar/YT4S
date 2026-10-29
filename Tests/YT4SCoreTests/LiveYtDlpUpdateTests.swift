@@ -2,10 +2,10 @@ import Foundation
 import Testing
 @testable import YT4SCore
 
-/// Opt-in: updates yt-dlp from the real GitHub nightly channel into a temp Application Support
-/// root (downloads ~55 MB). Run with `YT4S_LIVE_YTDLP_UPDATE=1 swift test --filter YtDlpUpdaterLiveTests`.
-@Suite(.enabled(if: ProcessInfo.processInfo.environment["YT4S_LIVE_YTDLP_UPDATE"] == "1"))
-struct YtDlpUpdaterLiveTests {
+/// Updates yt-dlp from the real GitHub nightly channel into a temp Application Support root
+/// (downloads ~55 MB). Live (see `LiveTests`); needs no bundled tool.
+@Suite(.live)
+struct LiveYtDlpUpdateTests {
     @Test(.timeLimit(.minutes(5)))
     func updatesFromTheRealNightlyChannel() async throws {
         let sandbox = FileManager.default.temporaryDirectory.appendingPathComponent("yt4s-live-update-\(UUID().uuidString)")

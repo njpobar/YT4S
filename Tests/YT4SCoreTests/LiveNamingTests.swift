@@ -3,20 +3,10 @@ import Testing
 @testable import YT4SCore
 
 /// Naming against the real bundled yt-dlp and YouTube: paste a video, a playlist and a channel,
-/// download, and check where the files land. Needs network, so it only runs when
-/// `YT4S_REAL_TOOLS` names a folder with `yt-dlp/yt-dlp_macos`, `ffmpeg`, `ffprobe` and `deno`
-/// (the app's `Contents/Resources/bin` layout), e.g. a built YT4S.app's.
-@MainActor @Suite(.enabled(if: ProcessInfo.processInfo.environment["YT4S_REAL_TOOLS"] != nil), .serialized)
-struct RealYtDlpNamingTests {
-    static var tools: BundledTools? {
-        guard let bin = ProcessInfo.processInfo.environment["YT4S_REAL_TOOLS"] else { return nil }
-        let folder = URL(fileURLWithPath: bin, isDirectory: true)
-        return BundledTools(
-            ytDlp: folder.appendingPathComponent("yt-dlp/yt-dlp_macos"),
-            ffmpegDirectory: folder,
-            deno: folder.appendingPathComponent("deno")
-        )
-    }
+/// download, and check where the files land. Live (see `LiveTests`), ~2 min.
+@MainActor @Suite(.live, .serialized)
+struct LiveNamingTests {
+    static var tools: BundledTools? { LiveTests.tools }
 
     private func download(_ links: String, _ options: DownloadOptions) async throws -> (URL, [QueueItem]) {
         let folder = FileManager.default.temporaryDirectory
