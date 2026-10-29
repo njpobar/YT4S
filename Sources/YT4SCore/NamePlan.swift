@@ -17,6 +17,15 @@ public struct VideoDetails: Equatable, Sendable {
     }
 }
 
+/// What is at a path in the Download folder, for the collision rule.
+public enum FileOccupant: Equatable, Sendable {
+    case free
+    /// A file YT4S saved for the same video (Download again replaces it).
+    case sameVideo
+    /// Any other file: another video, or a file YT4S did not save.
+    case otherVideo
+}
+
 /// A file's place in the Download folder before cleanup: folders, an optional playlist index
 /// prefix, and the name stem. Presets build one from a Naming pattern; a custom pattern can build
 /// one from its own rendered text. `relativePath` applies the same cleanup to every part.
@@ -79,6 +88,15 @@ public struct NamePlan: Equatable, Sendable {
         let budget = FileNameCleanup.maxNameBytes - FileNameCleanup.byteCount(prefix + suffix)
         let stem = FileNameCleanup.trim(Self.nonEmpty(FileNameCleanup.clean(stem)) ?? videoID, toBytes: budget)
         return folderPath + prefix + stem + suffix
+    }
+
+    /// The collision rule: the plain name, unless a different video already has it; then the
+    /// newcomer gets ` [<video id>]`. `occupant` says what is at a relative path now.
+    public func resolvedPath(videoID: String, fileExtension: String, occupant: (String) -> FileOccupant) -> String {
+        let plain = relativePath(videoID: videoID, fileExtension: fileExtension, withIDSuffix: false)
+        guard occupant(plain) == .otherVideo else { return plain }
+        // The suffixed name carries this video's ID, so whatever is there is taken to be this video.
+        return relativePath(videoID: videoID, fileExtension: fileExtension, withIDSuffix: true)
     }
 
     private static func folderName(_ name: String?, fallback: String) -> String {
