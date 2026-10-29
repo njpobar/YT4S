@@ -3,22 +3,18 @@ import Testing
 @testable import YT4SCore
 
 /// The real Queue and runner, end to end against the fake yt-dlp.
-@MainActor @Suite struct QueueTests {
+///
+/// Mid-download checks hold the fake at a progress step (`FakeYtDlp.hold(at:)`) and wait on
+/// conditions, never on wall-clock budgets: under load the fake can take seconds to start.
+/// The time limit only catches a hang.
+@MainActor @Suite(.timeLimit(.minutes(1))) struct QueueTests {
     private func request(_ fake: FakeYtDlp, id: String = "abc123") -> DownloadRequest {
         DownloadRequest(url: "https://www.youtube.com/watch?v=\(id)", downloadFolder: fake.downloadFolder, options: .default)
     }
 
-    /// Polls until `condition` holds, failing after `timeout`. Generous on purpose: polling returns
-    /// as soon as the condition holds, and a loaded machine can take seconds just to start the fake.
-    private func eventually(_ timeout: Duration = .seconds(30), _ condition: () -> Bool) async throws {
-        let deadline = ContinuousClock.now + timeout
-        while !condition() {
-            guard ContinuousClock.now < deadline else { throw TimeoutError() }
-            try await Task.sleep(for: .milliseconds(20))
-        }
+    private func fraction(_ item: QueueItem) -> Double? {
+        if case .running(let progress) = item.state { progress.fraction } else { nil }
     }
-
-    private struct TimeoutError: Error {}
 
     @Test func anAddedVideoIsPendingUntilItStarts() throws {
         let fake = try FakeYtDlp()
@@ -76,27 +72,31 @@ import Testing
 
     @Test func aRunningDownloadShowsLiveProgress() async throws {
         let fake = try FakeYtDlp()
-        let queue = Queue(runner: fake.runner(scenario: "slow", extraEnvironment: ["YT4S_FAKE_STEP_DELAY": "0.2"]))
+        let hold = fake.hold(at: 50)
+        defer { try? hold.release() }
+        let queue = Queue(runner: fake.runner(scenario: "success", extraEnvironment: hold.environment))
 
         queue.add(request(fake))
-        try await eventually {
-            if case .running(let progress) = queue.items[0].state { (progress.fraction ?? 0) >= 0.5 } else { false }
-        }
+        try await waitUntil { fraction(queue.items[0]) == 0.5 }
         #expect(queue.items[0].title == "Fake Video abc123")
 
+        try hold.release()
         await queue.waitUntilIdle()
         #expect(queue.items[0].isFinished)
     }
 
     @Test func videosDownloadOneAtATimeInOrder() async throws {
         let fake = try FakeYtDlp()
-        let queue = Queue(runner: fake.runner(scenario: "slow", extraEnvironment: ["YT4S_FAKE_STEP_DELAY": "0.1"]))
+        let hold = fake.hold(at: 0)
+        defer { try? hold.release() }
+        let queue = Queue(runner: fake.runner(scenario: "success", extraEnvironment: hold.environment))
 
         queue.add(request(fake, id: "first"))
         queue.add(request(fake, id: "second"))
-        try await eventually { if case .running = queue.items[0].state { true } else { false } }
+        try await waitUntil { fraction(queue.items[0]) == 0 }
         #expect(queue.items[1].state == .pending)
 
+        try hold.release()
         await queue.waitUntilIdle()
         #expect(queue.items.allSatisfy { $0.isFinished })
         #expect(queue.items.map(\.title) == ["Fake Video first", "Fake Video second"])
@@ -161,10 +161,6 @@ import Testing
 
     // MARK: - Queue controls (#22)
 
-    private func isRunning(_ item: QueueItem) -> Bool {
-        if case .running = item.state { true } else { false }
-    }
-
     /// Every file under `folder`, recursively, as paths relative to it.
     private func files(in folder: URL) -> [String] {
         (FileManager.default.subpaths(atPath: folder.path) ?? []).filter { path in
@@ -177,15 +173,12 @@ import Testing
     @Test func cancellingARunningVideoStopsItAndLeavesNoPartialFiles() async throws {
         let fake = try FakeYtDlp()
         let partials = fake.downloadFolder.deletingLastPathComponent().appendingPathComponent("partial")
-        let queue = Queue(
-            runner: fake.runner(scenario: "slow", extraEnvironment: ["YT4S_FAKE_STEP_DELAY": "0.3"]),
-            partialFilesFolder: partials
-        )
+        let hold = fake.hold(at: 25)
+        defer { try? hold.release() }
+        let queue = Queue(runner: fake.runner(scenario: "success", extraEnvironment: hold.environment), partialFilesFolder: partials)
 
         let id = queue.add(request(fake))
-        try await eventually {
-            if case .running(let progress) = queue.items[0].state { (progress.fraction ?? 0) >= 0.25 } else { false }
-        }
+        try await waitUntil { fraction(queue.items[0]) == 0.25 }
         #expect(!files(in: partials).isEmpty, "the partial file is written under the partial files folder")
 
         queue.cancel(id)
@@ -198,16 +191,21 @@ import Testing
 
     @Test func cancellingAWaitingVideoSkipsItAndTheQueueCarriesOn() async throws {
         let fake = try FakeYtDlp()
-        let queue = Queue(runner: fake.runner(scenario: "slow", extraEnvironment: ["YT4S_FAKE_STEP_DELAY": "0.1"]))
+        let hold = fake.hold(at: 0)
+        defer { try? hold.release() }
+        let queue = Queue(runner: fake.runner(scenario: "success", extraEnvironment: hold.environment))
 
         let first = queue.add(request(fake, id: "first"))
         let second = queue.add(request(fake, id: "second"))
         queue.add(request(fake, id: "third"))
-        try await eventually { isRunning(queue.items[0]) }
+        try await waitUntil { fraction(queue.items[0]) == 0 }
 
         queue.cancel(second)
         #expect(queue.items[1].state == .cancelled)
         queue.cancel(first)
+        // Released only once the first run is stopped, so it cannot finish ahead of Cancel.
+        try await waitUntil { queue.items[0].state == .cancelled }
+        try hold.release()
         await queue.waitUntilIdle()
 
         #expect(queue.items.map { $0.state == .cancelled } == [true, true, false])
@@ -419,7 +417,7 @@ import Testing
         let queue = Queue(runner: runner, networkRetryDelay: .seconds(30))
 
         let id = queue.add(request(fake))
-        try await eventually { runs(log) == 1 }
+        try await waitUntil { runs(log) == 1 }
         try await Task.sleep(for: .milliseconds(300))
         #expect(runs(log) == 1, "the second run waits for the delay")
         #expect(queue.items[0].isActive, "the row is not failed while waiting to retry")

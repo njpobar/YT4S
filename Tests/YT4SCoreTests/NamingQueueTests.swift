@@ -98,24 +98,26 @@ import Testing
         #expect(DownloadFolder(url: fake.downloadFolder).videoID(ofFileAt: file) == "abc123")
     }
 
-    @Test func theFinalNameIsPredictedBeforeTheDownloadStarts() async throws {
+    @Test(.timeLimit(.minutes(1)))
+    func theFinalNameIsPredictedBeforeTheDownloadStarts() async throws {
         let fake = try FakeYtDlp()
-        let queue = Queue(runner: fake.runner(scenario: "slow", extraEnvironment: ["YT4S_FAKE_STEP_DELAY": "0.3"]))
+        let hold = fake.hold(at: 0)
+        defer { try? hold.release() }
+        let queue = Queue(runner: fake.runner(scenario: "success", extraEnvironment: hold.environment))
         queue.add(DownloadRequest(
             url: "https://www.youtube.com/watch?v=abc123",
             downloadFolder: fake.downloadFolder,
             options: DownloadOptions(format: .video, quality: .best, naming: .dateTitle)
         ))
 
-        let deadline = ContinuousClock.now + .seconds(5)
-        while queue.items[0].plannedFile == nil, ContinuousClock.now < deadline {
-            try await Task.sleep(for: .milliseconds(20))
-        }
+        // The fake holds the run at 0%, so the prediction cannot race the finished download.
+        try await waitUntil { queue.items[0].plannedFile != nil }
 
         let planned = fake.downloadFolder.appendingPathComponent("2009-10-25 - Fake Video abc123.mp4")
         #expect(queue.items[0].plannedFile == planned)
         #expect(!queue.items[0].isFinished)
         #expect(!FileManager.default.fileExists(atPath: planned.path))
+        try hold.release()
         await queue.waitUntilIdle()
         #expect(queue.items[0].state == .finished(file: planned))
     }

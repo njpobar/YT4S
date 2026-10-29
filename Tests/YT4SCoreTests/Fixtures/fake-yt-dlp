@@ -17,6 +17,11 @@
 #   YT4S_FAKE_PLAYLIST_ERROR if set, listing a playlist/channel fails with this ERROR text (exit 1)
 #   YT4S_FAKE_ARGV_LOG       if set, argv is written there, each element NUL-terminated
 #   YT4S_FAKE_RUN_LOG        if set, one line (the scenario) is appended there per run
+#   YT4S_FAKE_HOLD_AT        a progress percent (0, 25, 50 or 75): after printing that step, each video
+#                            waits until YT4S_FAKE_RELEASE_FILE exists (lets a test act mid-download
+#                            without racing a timer; never created = held until terminated)
+#   YT4S_FAKE_RELEASE_FILE   see YT4S_FAKE_HOLD_AT
+#   YT4S_FAKE_PID_FILE       if set, the fake's pid is written there as soon as it starts
 #
 # Contract notes (mirrors real yt-dlp):
 #   - --version prints the version and exits 0.
@@ -40,6 +45,10 @@ if [[ -n ${YT4S_FAKE_SCENARIO_FILE:-} && -f $YT4S_FAKE_SCENARIO_FILE ]]; then
 fi
 step_delay=${YT4S_FAKE_STEP_DELAY:-0}
 [[ $scenario == slow && -z ${YT4S_FAKE_STEP_DELAY:-} ]] && step_delay=1
+
+if [[ -n ${YT4S_FAKE_PID_FILE:-} ]]; then
+  print -r -- $$ > "$YT4S_FAKE_PID_FILE"
+fi
 
 if [[ -n ${YT4S_FAKE_ARGV_LOG:-} ]]; then
   printf '%s\0' "$@" > "$YT4S_FAKE_ARGV_LOG"
@@ -332,6 +341,9 @@ process_video() {  # process_video ID [PLAYLIST_TITLE INDEX COUNT CHANNEL]
     fi
     print -n -- "partial $id $pct" > "$partpath"
     if (( pct == 100 )); then progress $pct finished; else progress $pct downloading; fi
+    if [[ ${YT4S_FAKE_HOLD_AT:-} == $pct ]]; then
+      until [[ -e ${YT4S_FAKE_RELEASE_FILE:?YT4S_FAKE_HOLD_AT needs YT4S_FAKE_RELEASE_FILE} ]]; do sleep 0.02; done
+    fi
     (( pct < 100 )) && [[ $step_delay != 0 ]] && sleep $step_delay
   done
 

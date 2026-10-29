@@ -71,19 +71,16 @@ import Testing
         model.stop()
     }
 
-    @Test func checksAgainWhileTheAppStaysOpen() async throws {
+    /// The time limit only catches a model that stops checking; waiting itself has no budget.
+    @Test(.timeLimit(.minutes(1)))
+    func checksAgainWhileTheAppStaysOpen() async throws {
         let feed = try FakeNightlyFeed(tag: "2026.10.26.220202")
         let model = model(feed, checkInterval: .milliseconds(20))
 
         await model.launch()
+        defer { model.stop() }
         let checks = { feed.requested.filter { $0 == FakeNightlyFeed.api }.count }
-        let deadline = ContinuousClock.now + .seconds(10)
-        while checks() < 3, ContinuousClock.now < deadline {
-            try await Task.sleep(for: .milliseconds(10))
-        }
-        model.stop()
-
-        #expect(checks() >= 3)
+        try await waitUntil { checks() >= 3 }
     }
 
     @Test func updateInstallsSwitchesDownloadsToItAndClearsTheBadge() async throws {

@@ -19,4 +19,26 @@ import Testing
 
         #expect(!FileManager.default.fileExists(atPath: marker.path))
     }
+
+    /// yt-dlp starts helpers (ffmpeg) that inherit its output. Cancel must stop them too: killing
+    /// only yt-dlp would leave them running and `run` waiting on the still-open pipe until they
+    /// finish. The time limit only catches that hang.
+    @Test(.timeLimit(.minutes(1)))
+    func cancellingAlsoStopsWhatTheChildStarted() async throws {
+        let (started, startedContinuation) = AsyncStream.makeStream(of: Void.self)
+        let task = Task {
+            // `; :` keeps sh from exec-ing sleep, so sleep is sh's own child.
+            try await Subprocess.run(
+                executable: URL(fileURLWithPath: "/bin/sh"),
+                arguments: ["-c", "echo started; sleep 120; :"],
+                onStdoutLine: { _ in startedContinuation.yield() }
+            )
+        }
+        for await _ in started { break }
+
+        task.cancel()
+        let result = try await task.value
+
+        #expect(result.termination == .signaled(SIGTERM))
+    }
 }

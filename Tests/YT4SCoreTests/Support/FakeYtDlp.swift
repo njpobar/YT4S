@@ -67,6 +67,31 @@ struct FakeYtDlp {
         )
     }
 
+    /// Pauses every video right after it prints progress step `percent` (0, 25, 50 or 75) until
+    /// `release()`, so a test can look at or act on a run mid-download without racing a timer.
+    func hold(at percent: Int) -> Hold {
+        Hold(percent: percent, releaseFile: argvLog.deletingLastPathComponent().appendingPathComponent("release-\(percent)"))
+    }
+
+    struct Hold {
+        let percent: Int
+        let releaseFile: URL
+
+        var environment: [String: String] {
+            ["YT4S_FAKE_HOLD_AT": String(percent), "YT4S_FAKE_RELEASE_FILE": releaseFile.path]
+        }
+
+        func release() throws { try Data().write(to: releaseFile) }
+    }
+
+    /// Where the fake writes its pid on start, when `YT4S_FAKE_PID_FILE` is set to it.
+    var pidFile: URL { argvLog.deletingLastPathComponent().appendingPathComponent("pid") }
+
+    /// The pid the last run wrote to `pidFile`, once it has started.
+    func pid() -> pid_t? {
+        (try? String(contentsOf: pidFile, encoding: .utf8)).flatMap { pid_t($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+    }
+
     /// argv of the last run. The fake writes each element NUL-terminated.
     func loggedArgv() throws -> [String] {
         try String(contentsOf: argvLog, encoding: .utf8)

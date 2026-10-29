@@ -110,18 +110,20 @@ import Testing
         #expect(result.stderr.contains("Traceback (most recent call last):"))
     }
 
-    @Test func cancellingASlowDownloadTerminatesTheProcess() async throws {
+    /// The time limit only catches a hang: the run is held at 0% and never released.
+    @Test(.timeLimit(.minutes(1)))
+    func cancellingAHeldDownloadTerminatesTheProcess() async throws {
         let fake = try FakeYtDlp()
-        let started = ContinuousClock.now
+        let hold = fake.hold(at: 0)
+        let environment = hold.environment.merging(["YT4S_FAKE_PID_FILE": fake.pidFile.path]) { $1 }
         let task = Task {
-            try await fake.run(["-P", fake.downloadFolder.path, "https://youtu.be/abc123"], scenario: "slow")
+            try await fake.run(["-P", fake.downloadFolder.path, "https://youtu.be/abc123"], scenario: "success", extraEnvironment: environment)
         }
-        try await Task.sleep(for: .milliseconds(500))
+        try await waitUntil { fake.pid() != nil }
         task.cancel()
         let result = try await task.value
 
         #expect(result.termination == .signaled(SIGTERM))
-        #expect(ContinuousClock.now - started < .seconds(3))
     }
 
     @Test func versionPrintsTheConfiguredTag() async throws {

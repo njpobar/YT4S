@@ -25,7 +25,7 @@ public struct SubprocessResult: Sendable {
 
 /// Runs an executable to completion and captures its output.
 ///
-/// Cancelling the calling task sends SIGTERM to the child.
+/// Cancelling the calling task sends SIGTERM to the child and everything it started.
 public enum Subprocess {
     /// - Parameter onStdoutLine: called on a background thread with each complete stdout line
     ///   (without the newline) as soon as it is written, in order, all before `run` returns.
@@ -68,14 +68,26 @@ public enum Subprocess {
                     // `onCancel` only terminates a running child: a cancel that landed before
                     // launch would otherwise let it run to completion. The flag is set before
                     // `onCancel` runs, so one of the two always sees it.
-                    if Task.isCancelled { process.terminate() }
+                    if Task.isCancelled { terminateAll(process) }
                 } catch {
                     process.terminationHandler = nil
                     continuation.resume(throwing: error)
                 }
             }
         } onCancel: {
-            if process.isRunning { process.terminate() }
+            if process.isRunning { terminateAll(process) }
+        }
+    }
+
+    /// SIGTERMs the child's whole process group, not just the child: yt-dlp's helpers (ffmpeg)
+    /// would otherwise keep running and hold the output pipe open, so `run` (and Cancel) would
+    /// wait for them to finish. `Process` makes each child the leader of its own group.
+    private static func terminateAll(_ process: Process) {
+        let pid = process.processIdentifier
+        if pid > 0, getpgid(pid) == pid {
+            kill(-pid, SIGTERM)
+        } else {
+            process.terminate()
         }
     }
 }

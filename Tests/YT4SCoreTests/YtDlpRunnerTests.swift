@@ -3,7 +3,9 @@ import Testing
 @testable import YT4SCore
 
 /// The runner streams YT4S's machine-readable lines while yt-dlp runs, then reports how it ended.
-@Suite struct YtDlpRunnerTests {
+/// Timing-sensitive checks hold the fake mid-download and wait on conditions; the time limit
+/// only catches a hang.
+@Suite(.timeLimit(.minutes(1))) struct YtDlpRunnerTests {
     private func collect(_ runner: YtDlpRunner, _ arguments: [String]) async throws -> (events: [YtDlpEvent], exit: YtDlpExit?) {
         var events: [YtDlpEvent] = []
         var exit: YtDlpExit?
@@ -50,15 +52,20 @@ import Testing
 
     @Test func eventsArriveWhileYtDlpIsStillRunning() async throws {
         let fake = try FakeYtDlp()
-        let runner = fake.runner(scenario: "slow", extraEnvironment: ["YT4S_FAKE_STEP_DELAY": "0.3"])
-        let started = ContinuousClock.now
-        var firstProgressAt: Duration?
-        for try await update in runner.run(DownloadArguments.arguments(for: request(fake))) {
-            if case .event(.progress) = update, firstProgressAt == nil { firstProgressAt = ContinuousClock.now - started }
+        // The fake waits at 0% until released, and is released only once that progress line has
+        // arrived: a runner that delivered lines only at exit would never get here (time limit).
+        let hold = fake.hold(at: 0)
+        defer { try? hold.release() }
+        var exit: YtDlpExit?
+        for try await update in fake.runner(scenario: "success", extraEnvironment: hold.environment).run(DownloadArguments.arguments(for: request(fake))) {
+            switch update {
+            case .event(.progress): try hold.release()
+            case .event: break
+            case .exited(let ended): exit = ended
+            }
         }
-        let total = ContinuousClock.now - started
 
-        #expect(try #require(firstProgressAt) < total - .milliseconds(600))
+        #expect(exit?.succeeded == true)
     }
 
     @Test func aCrashEndsWithTheSignalAndTheRawStderr() async throws {
@@ -73,17 +80,20 @@ import Testing
 
     @Test func cancellingTheConsumerTerminatesYtDlp() async throws {
         let fake = try FakeYtDlp()
-        // 4 steps of 10s: an uncancelled run takes 40s, far above the bound even on a loaded machine.
-        let runner = fake.runner(scenario: "slow", extraEnvironment: ["YT4S_FAKE_STEP_DELAY": "10"])
-        let started = ContinuousClock.now
+        // Held at 0% and never released: only termination can end this run.
+        let hold = fake.hold(at: 0)
+        let runner = fake.runner(scenario: "success", extraEnvironment: hold.environment.merging(["YT4S_FAKE_PID_FILE": fake.pidFile.path]) { $1 })
         let task = Task {
             for try await _ in runner.run(DownloadArguments.arguments(for: request(fake))) {}
         }
-        try await Task.sleep(for: .milliseconds(300))
+        try await waitUntil { fake.pid() != nil }
+        let pid = try #require(fake.pid())
+
         task.cancel()
         _ = await task.result
 
-        #expect(ContinuousClock.now - started < .seconds(20))
+        // Gone along with anything it started (its process group); a hang here hits the time limit.
+        try await waitUntil { kill(-pid, 0) != 0 && errno == ESRCH }
     }
 
     @Test func aMissingExecutableThrows() async throws {
