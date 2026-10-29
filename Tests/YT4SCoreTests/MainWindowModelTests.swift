@@ -53,6 +53,105 @@ import Testing
         #expect(model.errorMessage == nil)
     }
 
+    @Test func startsFromTheSavedSettings() throws {
+        let fake = try FakeYtDlp()
+        let suite = TestDefaults()
+        suite.relaunch().downloadFolder = fake.downloadFolder
+
+        let model = MainWindowModel(queue: Queue(runner: fake.runner(scenario: "success")), settings: suite.relaunch())
+        model.pasteText = "https://youtu.be/abc123"
+        model.download()
+
+        #expect(model.downloadFolder == suite.relaunch().downloadFolder)
+        #expect(model.options == .default)
+        #expect(model.queue.items.map(\.request.downloadFolder) == [fake.downloadFolder])
+    }
+
+    @Test func firstLaunchUsesTheDefaultFolderWithoutCreatingIt() throws {
+        let fake = try FakeYtDlp()
+        let model = MainWindowModel(queue: Queue(runner: fake.runner(scenario: "success")), settings: TestDefaults().relaunch())
+
+        #expect(model.downloadFolder == MainWindowModel.defaultDownloadFolder)
+        #expect(model.options == DownloadOptions(format: .video, quality: .best, naming: .title))
+        #expect(model.errorMessage == nil)
+    }
+
+    @Test func changingTheFolderOrOptionsIsSavedButThePasteBoxAndQueueAreNot() async throws {
+        let fake = try FakeYtDlp()
+        let suite = TestDefaults()
+        let model = MainWindowModel(queue: Queue(runner: fake.runner(scenario: "success")), settings: suite.relaunch())
+
+        model.chooseDownloadFolder(fake.downloadFolder)
+        model.options = .default
+        model.pasteText = "https://youtu.be/abc123"
+        model.download()
+        await model.queue.waitUntilIdle()
+        model.pasteText = "https://youtu.be/def456"
+
+        let relaunched = MainWindowModel(queue: Queue(runner: fake.runner(scenario: "success")), settings: suite.relaunch())
+        #expect(relaunched.downloadFolder == fake.downloadFolder)
+        #expect(suite.defaults.string(forKey: Settings.Key.format) == "video")
+        #expect(relaunched.pasteText == "")
+        #expect(relaunched.queue.items.isEmpty)
+    }
+
+    @Test func choosingAFolderClearsTheFolderError() throws {
+        let fake = try FakeYtDlp()
+        let model = model(fake, folder: URL(fileURLWithPath: "/nonexistent-yt4s-parent/YT4S", isDirectory: true))
+        model.pasteText = "https://youtu.be/abc123"
+        model.download()
+        #expect(model.errorMessage != nil)
+
+        model.chooseDownloadFolder(fake.downloadFolder)
+
+        #expect(model.errorMessage == nil)
+        #expect(model.downloadFolder == fake.downloadFolder)
+    }
+
+    @Test func aDeletedFolderIsRecreatedWhenItsParentExists() async throws {
+        let fake = try FakeYtDlp()
+        let folder = fake.downloadFolder.appendingPathComponent("Videos", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
+        let model = model(fake, folder: folder)
+        try FileManager.default.removeItem(at: folder)
+        model.pasteText = "https://youtu.be/abc123"
+
+        model.download()
+        await model.queue.waitUntilIdle()
+
+        #expect(model.downloadFolder == folder)
+        #expect(model.queue.items.first?.state == .finished(file: folder.appendingPathComponent("Fake Video abc123.mp4")))
+    }
+
+    @Test func aFileWhereTheFolderShouldBeIsAnErrorNotADownload() throws {
+        let fake = try FakeYtDlp()
+        let file = fake.downloadFolder.appendingPathComponent("NotAFolder")
+        try Data().write(to: file)
+        let model = model(fake, folder: file)
+        model.pasteText = "https://youtu.be/abc123"
+
+        model.download()
+
+        #expect(model.queue.items.isEmpty)
+        #expect(model.errorMessage == "Couldn't create the folder \(file.path). Choose another Download folder.")
+    }
+
+    @Test func aMissingFolderWithAMissingParentNeverFallsBackToAnotherFolder() throws {
+        let fake = try FakeYtDlp()
+        let suite = TestDefaults()
+        let gone = URL(fileURLWithPath: "/nonexistent-yt4s-parent/YT4S", isDirectory: true)
+        suite.relaunch().downloadFolder = gone
+        let model = MainWindowModel(queue: Queue(runner: fake.runner(scenario: "success")), settings: suite.relaunch())
+        model.pasteText = "https://youtu.be/abc123"
+
+        model.download()
+
+        #expect(model.queue.items.isEmpty)
+        #expect(model.downloadFolder == gone)
+        #expect(suite.relaunch().downloadFolder == gone)
+        #expect(model.errorMessage == "Couldn't create the folder /nonexistent-yt4s-parent/YT4S. Choose another Download folder.")
+    }
+
     @Test func anUncreatableFolderShowsAPlainErrorAndQueuesNothing() throws {
         let fake = try FakeYtDlp()
         let model = model(fake, folder: URL(fileURLWithPath: "/nonexistent-yt4s-parent/YT4S", isDirectory: true))
