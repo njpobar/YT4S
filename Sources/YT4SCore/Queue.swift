@@ -151,7 +151,11 @@ public final class Queue {
 
     private func startWorkerIfNeeded() {
         guard worker == nil else { return }
+        // Keeps App Nap from throttling the Queue (and idle sleep from cutting downloads short)
+        // while YT4S is in the background, so rows and the batch notification stay on time.
+        let activity = ProcessInfo.processInfo.beginActivity(options: .userInitiated, reason: "Downloading videos")
         worker = Task { [weak self] in
+            defer { ProcessInfo.processInfo.endActivity(activity) }
             while let self, let next = self.items.first(where: { $0.state == .pending }) {
                 let task = Task { await self.download(next.id) }
                 self.current = (next.id, task)
