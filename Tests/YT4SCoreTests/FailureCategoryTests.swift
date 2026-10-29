@@ -60,10 +60,24 @@ import Testing
         #expect(FailureCategory(stderr: stderr, termination: .exited(1)) == .unavailable)
     }
 
-    @Test func aCrashOrALaunchFailureIsUnknown() {
+    @Test func aCrashOrALaunchFailureWithoutAnErrorLineIsUnknown() {
         #expect(FailureCategory(stderr: "Traceback (most recent call last):", termination: .signaled(SIGSEGV)) == .unknown)
         #expect(FailureCategory(stderr: "The file doesn't exist.", termination: nil) == .unknown)
         #expect(FailureCategory(stderr: "", termination: .exited(1)) == .unknown)
+    }
+
+    @Test func aSignalledRunIsCategorizedByItsErrorLines() {
+        let stderr = """
+        ERROR: [download] Got error: HTTPSConnectionPool(host='rr1.googlevideo.com', port=443): Read timed out.
+        Traceback (most recent call last):
+        """
+        #expect(FailureCategory(stderr: stderr, termination: .signaled(SIGSEGV)) == .network)
+    }
+
+    @Test func aSignalledRunIgnoresMarkersOutsideErrorLines() {
+        // A crash dump can mention anything; only what yt-dlp reported as the error counts.
+        let stderr = "Traceback (most recent call last):\n  File \"nsig.py\", line 3, in <module>"
+        #expect(FailureCategory(stderr: stderr, termination: .signaled(SIGSEGV)) == .unknown)
     }
 
     @Test func onlyUnavailableAndRegionBlockedCannotBeRetried() {

@@ -23,14 +23,19 @@ public enum FailureCategory: Equatable, Sendable, CaseIterable {
     ///
     /// Only `ERROR:` lines are read when there are any, so a warning printed along the way (e.g.
     /// "n challenge solving failed") cannot override the error that actually stopped the run.
+    /// A run that did not exit normally (killed by a signal, or never launched) is read from its
+    /// `ERROR:` lines only: the rest is a crash dump or a launch error, so without one it is Unknown.
     /// Rules are checked in order; the first match wins.
     public init(stderr: String, termination: SubprocessTermination?) {
-        guard case .exited = termination else {
-            self = .unknown
-            return
-        }
         let errorLines = stderr.split(whereSeparator: \.isNewline).filter { $0.contains("ERROR:") }
-        let text = errorLines.isEmpty ? stderr : errorLines.joined(separator: "\n")
+        let text: String
+        if !errorLines.isEmpty {
+            text = errorLines.joined(separator: "\n")
+        } else if case .exited = termination {
+            text = stderr
+        } else {
+            text = ""
+        }
         self = Self.rules.first { rule in rule.markers.contains { text.localizedCaseInsensitiveContains($0) } }?.category ?? .unknown
     }
 
@@ -55,7 +60,10 @@ public enum FailureCategory: Equatable, Sendable, CaseIterable {
         (.looksOutdated, [
             "HTTP Error 403", "not found, unable to continue", "Unable to extract", "nsig", "n challenge",
             "Signature solving failed", "signature extraction failed", "not a bot",
-            "player response", "Requested format is not available",
+            "player response",
+            // Every preset's selector ends in a catch-all (`/b`), so this means YouTube served no
+            // usable formats at all: an extraction problem that a newer yt-dlp fixes.
+            "Requested format is not available",
         ]),
         (.network, [
             "timed out", "Connection refused", "Connection reset", "Connection aborted",
