@@ -14,11 +14,16 @@ struct MainWindow: View {
             HStack(alignment: .bottom) {
                 VStack(alignment: .leading, spacing: 5) {
                     SectionLabel("Save to")
-                    Text(model.downloadFolder.abbreviatingWithTildeInPath)
-                        .font(.system(.body, design: .monospaced))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .textSelection(.enabled)
+                    HStack(spacing: 8) {
+                        Text(model.downloadFolder.abbreviatingWithTildeInPath)
+                            .font(.system(.body, design: .monospaced))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .textSelection(.enabled)
+                            .help(model.downloadFolder.path)
+                        Button("Change...") { chooseDownloadFolder() }
+                            .controlSize(.small)
+                    }
                 }
                 Spacer(minLength: 16)
                 Button("Download") { model.download() }
@@ -44,6 +49,25 @@ struct MainWindow: View {
         }
         .padding(18)
         .frame(minWidth: 560, minHeight: 640)
+    }
+}
+
+extension MainWindow {
+    /// Folder picker for "Change...". Opens at the current folder, or its parent if it is gone.
+    func chooseDownloadFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Choose"
+        panel.message = "Choose where YT4S saves downloads."
+        let current = model.downloadFolder
+        panel.directoryURL = FileManager.default.fileExists(atPath: current.path)
+            ? current : current.deletingLastPathComponent()
+        if panel.runModal() == .OK, let url = panel.url {
+            model.chooseDownloadFolder(url)
+        }
     }
 }
 
