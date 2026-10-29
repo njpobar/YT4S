@@ -1,0 +1,9 @@
+# Third-party binaries bundled into YT4S.app (ADR 0002).
+# Fetched by scripts/fetch-deps.sh into vendor/ (gitignored), cached by SHA-256; a mismatch aborts.
+# To bump one: run scripts/update-deps.sh <name>, review its output, paste the line here.
+#
+# name    version             sha256                                                            url
+yt-dlp    2026.10.26.220202   0571d12722bd0affc5919bf8210f84d5707375661c8fa198bedec9f83f5266db  https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/download/2026.10.26.220202/yt-dlp_macos.zip
+deno      2.9.8               9f0bf660393da2eaff044cdc7444cb08c73f235849b61d224d825a194ce7c98e  https://github.com/denoland/deno/releases/download/v2.9.8/deno-aarch64-apple-darwin.zip
+ffmpeg    9.0.2               c8ed4c4e6978a03c485edbfe4e0a5dc2380f8a30bba5150531b31b094492d924  https://ffmpeg.martin-riedl.de/download/macos/arm64/1789931890_9.0.2/ffmpeg.zip
+ffprobe   9.0.2               fcbe839537485eaee7a7a8bc5cbc0f90d53617e80943e8a5b2e31cb851197ea6  https://ffmpeg.martin-riedl.de/download/macos/arm64/1789931890_9.0.2/ffprobe.zip
