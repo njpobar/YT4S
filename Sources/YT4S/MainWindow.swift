@@ -24,7 +24,7 @@ struct MainWindow: View {
             FormatRow(options: $model.options)
                 .padding(.top, 12)
 
-            NamingRow(options: $model.options)
+            NamingRow(model: model)
                 .padding(.top, 12)
 
             HStack(alignment: .bottom) {
@@ -132,25 +132,64 @@ private struct FormatRow: View {
     }
 }
 
-/// "File names": the Naming pattern preset, with an example name in the chosen Format.
+/// "File names": the Naming pattern, with an example name in the chosen Format. The Advanced
+/// checkbox adds Custom: a yt-dlp output template field with a live preview under it.
 private struct NamingRow: View {
-    @Binding var options: DownloadOptions
+    @Bindable var model: MainWindowModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             SectionLabel("File names")
             HStack(spacing: 10) {
-                Picker("Naming pattern", selection: $options.naming) {
-                    ForEach(NamingPattern.allCases, id: \.self) { Text($0.label) }
+                Picker("Naming pattern", selection: $model.options.naming) {
+                    ForEach(model.namingChoices, id: \.self) { Text($0.label) }
                 }
                 .labelsHidden()
                 .fixedSize()
-                Text("e.g. \(options.naming.example(format: options.format))")
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                if model.options.naming != .custom {
+                    Text("e.g. \(model.options.naming.example(format: model.options.format))")
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                Spacer(minLength: 0)
+                Toggle("Advanced", isOn: $model.advancedNaming)
+                    .toggleStyle(.checkbox)
+                    .controlSize(.small)
+                    .help("Offer Custom: write the file name as a yt-dlp output template")
+            }
+            if model.options.naming == .custom {
+                TextField("Template", text: $model.options.customTemplate, prompt: Text(CustomNamingTemplate.starter))
+                    .font(.system(.body, design: .monospaced))
+                    .textFieldStyle(.roundedBorder)
+                    .labelsHidden()
+                    .autocorrectionDisabled()
+                    .help("A yt-dlp output template, e.g. %(channel)s/%(title)s. A / makes a folder; the extension is added for you.")
+                CustomPreviewLine(preview: model.customPreview)
             }
         }
+    }
+}
+
+/// Under the custom template: the example name, or why the template is invalid.
+private struct CustomPreviewLine: View {
+    let preview: CustomNamePreview?
+
+    var body: some View {
+        Group {
+            switch preview {
+            case .example(let name):
+                Text("e.g. \(name)").foregroundStyle(.secondary)
+            case .invalid(let reason):
+                Text(reason).foregroundStyle(.red)
+            case nil:
+                Text("e.g. ...").foregroundStyle(.secondary)
+            }
+        }
+        .font(.callout)
+        .lineLimit(1)
+        .truncationMode(.middle)
+        .textSelection(.enabled)
     }
 }
 

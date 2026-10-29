@@ -17,8 +17,12 @@ import Testing
         #expect(try await sandbox.remoteGit("rev-parse main") == tagged)
         #expect(try await sandbox.remoteGit("show v0.2.0:VERSION") == "0.2.0")
 
-        // swift test ran before anything was built.
-        #expect(try sandbox.invocations(sandbox.swiftLog).first?.prefix(1) == ["test"])
+        // swift test ran before anything was built; then the live contract test, against the
+        // tools inside the app just built (the stub swift fails if the app is not there yet).
+        let swiftRuns = try sandbox.invocations(sandbox.swiftLog)
+        #expect(swiftRuns.first?.prefix(1) == ["test"])
+        #expect(swiftRuns.dropFirst().map { Array($0.prefix(2)) } == [["YT4S_LIVE_APP=\(sandbox.file("build/YT4S.app").path)", "test"]])
+        #expect(swiftRuns.last?.contains("^YT4SCoreTests\\.LiveContractTests/") == true)
 
         // One draft release with exactly the zip, its appcast and the DMG.
         let create = try #require(try releaseCreations(sandbox).first)
@@ -176,6 +180,31 @@ import Testing
 
         #expect(result.termination != .exited(0))
         #expect(!FileManager.default.fileExists(atPath: sandbox.file("build/YT4S.app").path))
+        try await expectNothingPublished(sandbox, head: head)
+    }
+
+    @Test func failingLiveContractTestStopsTheRelease() async throws {
+        let sandbox = try await ReleaseSandbox()
+        let head = try await sandbox.git("rev-parse HEAD")
+
+        let result = try await sandbox.release(["0.2.0"], input: "0.2.0\n", environment: ["YT4S_STUB_LIVE_TEST_EXIT": "1"])
+
+        #expect(result.termination == .exited(1), "\(result.stdout)\n\(result.stderr)")
+        #expect(result.stderr.contains("live contract test failed"), "\(result.stderr)")
+        #expect(!FileManager.default.fileExists(atPath: sandbox.file("dist").path), "packaged anyway")
+        try await expectNothingPublished(sandbox, head: head)
+    }
+
+    @Test(arguments: ["skipped", "none"])
+    func aLiveContractTestThatRanNothingStopsTheRelease(result: String) async throws {
+        let sandbox = try await ReleaseSandbox()
+        let head = try await sandbox.git("rev-parse HEAD")
+
+        let run = try await sandbox.release(["0.2.0"], input: "0.2.0\n", environment: ["YT4S_STUB_LIVE_TEST_RESULT": result])
+
+        #expect(run.termination == .exited(1), "\(run.stdout)\n\(run.stderr)")
+        #expect(run.stderr.contains("live contract test did not run"), "\(run.stderr)")
+        #expect(!FileManager.default.fileExists(atPath: sandbox.file("dist").path), "packaged anyway")
         try await expectNothingPublished(sandbox, head: head)
     }
 

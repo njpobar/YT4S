@@ -3,20 +3,10 @@ import Testing
 @testable import YT4SCore
 
 /// Naming against the real bundled yt-dlp and YouTube: paste a video, a playlist and a channel,
-/// download, and check where the files land. Needs network, so it only runs when
-/// `YT4S_REAL_TOOLS` names a folder with `yt-dlp/yt-dlp_macos`, `ffmpeg`, `ffprobe` and `deno`
-/// (the app's `Contents/Resources/bin` layout), e.g. a built YT4S.app's.
-@MainActor @Suite(.enabled(if: ProcessInfo.processInfo.environment["YT4S_REAL_TOOLS"] != nil), .serialized)
-struct RealYtDlpNamingTests {
-    static var tools: BundledTools? {
-        guard let bin = ProcessInfo.processInfo.environment["YT4S_REAL_TOOLS"] else { return nil }
-        let folder = URL(fileURLWithPath: bin, isDirectory: true)
-        return BundledTools(
-            ytDlp: folder.appendingPathComponent("yt-dlp/yt-dlp_macos"),
-            ffmpegDirectory: folder,
-            deno: folder.appendingPathComponent("deno")
-        )
-    }
+/// download, and check where the files land. Live (see `LiveTests`), ~2 min.
+@MainActor @Suite(.live, .serialized)
+struct LiveNamingTests {
+    static var tools: BundledTools? { LiveTests.tools }
 
     private func download(_ links: String, _ options: DownloadOptions) async throws -> (URL, [QueueItem]) {
         let folder = FileManager.default.temporaryDirectory
@@ -87,6 +77,23 @@ struct RealYtDlpNamingTests {
 
         #expect(files(in: folder) == ["Me at the zoo [jNQXAC9IVRw].mp3", "Me at the zoo.mp3"])
         #expect(try String(contentsOf: existing, encoding: .utf8) == "not this video")
+    }
+
+    @Test func aCustomTemplateWithPlaylistFieldsAndADateFolder() async throws {
+        let (folder, items) = try await download(
+            "https://www.youtube.com/playlist?list=PLlaN88a7y2_qHDbY9eQbuNTAuEJUSEeuu",
+            DownloadOptions(
+                format: .mp3, quality: .best, naming: .custom,
+                customTemplate: "%(playlist_title)s/%(upload_date>%Y)s/%(playlist_index)03d of %(playlist_count)s: %(id)s.%(ext)s"
+            )
+        )
+
+        #expect(items.count == 3)
+        #expect(items.allSatisfy { $0.isFinished })
+        let names = files(in: folder)
+        #expect(names.count == 3)
+        #expect(names.allSatisfy { $0.hasPrefix("Rick Astley Live at The O2/20") && $0.hasSuffix(".mp3") })
+        #expect(names.map { ($0 as NSString).lastPathComponent.prefix(11) } == ["001 of 3 - ", "002 of 3 - ", "003 of 3 - "])
     }
 
     @Test func aRenamedVideoIsAlreadyDownloadedAndDownloadAgainSavesASecondCopy() async throws {
