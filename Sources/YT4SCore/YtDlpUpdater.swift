@@ -126,9 +126,10 @@ public struct YtDlpUpdater: Sendable {
         }
     }
 
-    /// At launch: the first copy of `installations.fallbackChain()` (active, previous, bundled)
-    /// whose `--version` runs, or `nil` when none does and the app is damaged. Changes nothing on
-    /// disk, so a copy that failed once is tried again at the next launch.
+    /// At launch, and mid-session when the copy in use fails to start: the first copy of
+    /// `installations.fallbackChain()` (active, previous, bundled) whose `--version` runs, or
+    /// `nil` when none does and the app is damaged. Changes nothing on disk, so a copy that
+    /// failed once is tried again at the next launch.
     public func firstLaunchableCopy() async -> YtDlpCopy? {
         for copy in installations.fallbackChain() where await version(of: copy.executable) != nil {
             return copy

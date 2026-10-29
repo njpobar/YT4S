@@ -45,6 +45,9 @@ public final class MainWindowModel {
     /// Where choices are saved; `nil` for a model that saves nothing.
     @ObservationIgnored private let settings: Settings?
     @ObservationIgnored private let renderCustomName: @Sendable (String, Format) async -> CustomNamePreview
+    /// Whether yt-dlp's launch check has finished (`YtDlpUpdateModel.isReady`); read on every
+    /// access, so pass a closure over observable state.
+    @ObservationIgnored private let ytDlpReady: @MainActor () -> Bool
     @ObservationIgnored private var customPreviewTask: Task<Void, Never>?
 
     public nonisolated static var defaultDownloadFolder: URL {
@@ -54,12 +57,15 @@ public final class MainWindowModel {
 
     /// Starts from the saved choices (first-run defaults if none) and saves every change.
     /// `renderCustomName` previews a custom template (default: the queue's yt-dlp, offline).
+    /// Download stays disabled until `ytDlpReady` says the launch check has picked a yt-dlp.
     public init(
         queue: Queue, settings: Settings,
-        renderCustomName: (@Sendable (String, Format) async -> CustomNamePreview)? = nil
+        renderCustomName: (@Sendable (String, Format) async -> CustomNamePreview)? = nil,
+        ytDlpReady: @escaping @MainActor () -> Bool = { true }
     ) {
         self.queue = queue
         self.settings = settings
+        self.ytDlpReady = ytDlpReady
         self.renderCustomName = renderCustomName ?? Self.previewer(queue)
         self.downloadFolder = settings.downloadFolder
         self.advancedNaming = settings.advancedNaming
@@ -73,6 +79,7 @@ public final class MainWindowModel {
     public init(queue: Queue, downloadFolder: URL = MainWindowModel.defaultDownloadFolder) {
         self.queue = queue
         self.settings = nil
+        self.ytDlpReady = { true }
         self.renderCustomName = Self.previewer(queue)
         self.downloadFolder = downloadFolder
         self.options = .default
@@ -121,7 +128,7 @@ public final class MainWindowModel {
     /// The paste box read as Sources, with a live label per line.
     public var paste: Paste { Paste(pasteText) }
 
-    public var canDownload: Bool { !paste.sources.isEmpty }
+    public var canDownload: Bool { !paste.sources.isEmpty && ytDlpReady() }
 
     /// Shown while Playlist and Channel sources are being listed, e.g. "Looking up the videos of 1 playlist...".
     public var listingMessage: String? {
@@ -148,9 +155,9 @@ public final class MainWindowModel {
     /// except for lines that are not YouTube links (never sent to yt-dlp, left there to fix).
     /// Video links queue at once; Playlist and Channel sources are listed by yt-dlp first.
     public func download() {
+        guard canDownload else { return }
         let paste = paste
         let sources = paste.sources
-        guard !sources.isEmpty else { return }
         if options.naming == .custom, case .invalid(let reason) = customPreview {
             errorMessage = "Fix the custom file name pattern first. \(reason)"
             return

@@ -267,9 +267,15 @@ public enum YtDlpRollBackError: Error, Equatable, Sendable {
 }
 
 /// The yt-dlp copy downloads run with right now, shared between the updater (which changes it
-/// at launch and after an update) and `YtDlpRunner` (which reads it at the start of each run).
+/// at launch, after an update, and when the copy stops starting) and `YtDlpRunner` (which reads
+/// it at the start of each run).
 public final class YtDlpSelection: Sendable {
+    /// Given a copy that just failed to start, returns the copy to retry the run with (after
+    /// selecting it), or `nil` when there is none or the copy does start (the run's failure stands).
+    public typealias Fallback = @Sendable (YtDlpCopy) async -> YtDlpCopy?
+
     private let state: OSAllocatedUnfairLock<YtDlpCopy>
+    private let fallback = OSAllocatedUnfairLock<Fallback?>(initialState: nil)
 
     public init(_ copy: YtDlpCopy) {
         state = OSAllocatedUnfairLock(initialState: copy)
@@ -279,5 +285,16 @@ public final class YtDlpSelection: Sendable {
 
     public func select(_ copy: YtDlpCopy) {
         state.withLock { $0 = copy }
+    }
+
+    /// Set by `YtDlpUpdateModel`: falls back active, previous, bundled (ADR 0002).
+    public func onLaunchFailure(_ fallback: @escaping Fallback) {
+        self.fallback.withLock { $0 = fallback }
+    }
+
+    /// `YtDlpRunner` calls this when `copy` looked like it did not start at all.
+    func fallBack(from copy: YtDlpCopy) async -> YtDlpCopy? {
+        guard let fallback = fallback.withLock({ $0 }) else { return nil }
+        return await fallback(copy)
     }
 }

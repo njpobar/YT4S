@@ -167,7 +167,9 @@ extension YT4SApp {
             downloadsRunning: downloadsRunning
         )
         let queue = Queue(runner: YtDlpRunner(tools: BundledTools(resourcesDirectory: resources), selection: ytDlpUpdates.selection))
-        let window = MainWindowModel(queue: queue, settings: Settings(defaults: .standard))
+        let window = MainWindowModel(
+            queue: queue, settings: Settings(defaults: .standard), ytDlpReady: { ytDlpUpdates.isReady }
+        )
         windowBox.model = window
         queue.dismissesOutdatedBanner(whenSwitching: ytDlpUpdates)
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"

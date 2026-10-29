@@ -3,7 +3,7 @@ import SwiftUI
 import YT4SCore
 
 /// The main window's content: the normal window, or the damaged screen when no yt-dlp copy
-/// starts (active, previous and bundled all failed at launch, ADR 0002).
+/// starts (active, previous and bundled all failed, at launch or mid-session, ADR 0002).
 struct MainWindowContent: View {
     let models: WindowModels
 

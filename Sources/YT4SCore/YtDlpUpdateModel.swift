@@ -28,9 +28,13 @@ public final class YtDlpUpdateModel {
     /// What Roll back would switch to (the previous download, or the bundled copy after the first
     /// update); `nil` disables the button.
     public private(set) var rollBackTarget: YtDlpCopy?
-    /// Set at launch when no yt-dlp copy starts, not even the bundled one: the window then shows
-    /// only "YT4S is damaged. Reinstall the app." with Update app.
+    /// Set when no yt-dlp copy starts, not even the bundled one, at launch or later when the copy
+    /// in use stops starting: the window then shows only "YT4S is damaged. Reinstall the app."
+    /// with Update app.
     public private(set) var isDamaged = false
+    /// The launch check has picked the copy downloads run with. Download waits for it, so nothing
+    /// runs before `isDamaged` is known.
+    public private(set) var isReady = false
     /// Outcome of the last click on Update yt-dlp.
     private var result: Message?
     /// Update yt-dlp installed a newer copy since launch. Looks-outdated failures after that make
@@ -44,6 +48,9 @@ public final class YtDlpUpdateModel {
     @ObservationIgnored private let checkInterval: Duration
     @ObservationIgnored private let downloadsRunning: @MainActor () -> Bool
     @ObservationIgnored private var periodicCheck: Task<Void, Never>?
+    /// The fallback in progress after a copy failed to start mid-session; runs failing meanwhile
+    /// wait for it instead of checking the chain again.
+    @ObservationIgnored private var fallingBack: Task<YtDlpCopy?, Never>?
 
     /// - Parameter downloadsRunning: whether any Queue item is pending or running; read on every
     ///   access, so pass a closure over observable state (e.g. `MainWindowModel.downloadsRunning`).
@@ -59,6 +66,7 @@ public final class YtDlpUpdateModel {
         self.current = copy
         self.selection = YtDlpSelection(copy)
         self.rollBackTarget = updater.installations.rollBackTarget()
+        selection.onLaunchFailure { [weak self] copy in await self?.fallBack(from: copy) }
     }
 
     // MARK: What the footer shows
@@ -92,6 +100,7 @@ public final class YtDlpUpdateModel {
         } else {
             isDamaged = true
         }
+        isReady = true
         await check()
         periodicCheck?.cancel()
         let interval = checkInterval
@@ -102,6 +111,26 @@ public final class YtDlpUpdateModel {
                 await self.check()
             }
         }
+    }
+
+    /// Mid-session: `copy` did not start when a run launched it. Like at launch, picks the first
+    /// copy of the fallback chain that starts and selects it, or marks YT4S damaged when none
+    /// does. Returns the copy to retry the run with; `copy` itself when it does start after all
+    /// (the run's failure was about the video), `nil` when damaged.
+    func fallBack(from copy: YtDlpCopy) async -> YtDlpCopy? {
+        if current != copy { return current } // another run already switched away from it
+        if let fallingBack { return await fallingBack.value }
+        let updater = updater
+        let task = Task { await updater.firstLaunchableCopy() }
+        fallingBack = task
+        let found = await task.value
+        fallingBack = nil
+        if let found {
+            if found != current { select(found) }
+        } else {
+            isDamaged = true
+        }
+        return found
     }
 
     /// Stops the periodic check.

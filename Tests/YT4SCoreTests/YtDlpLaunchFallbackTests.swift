@@ -2,7 +2,8 @@ import Foundation
 import Testing
 @testable import YT4SCore
 
-/// At launch, a yt-dlp copy that cannot start is skipped: active, then previous, then bundled.
+/// A yt-dlp copy that cannot start is skipped: active, then previous, then bundled. At launch,
+/// and mid-session when the copy in use stops starting (the run is retried on the next copy).
 @Suite struct YtDlpLaunchFallbackTests {
     let sandbox: URL
     let root: URL
@@ -88,6 +89,107 @@ import Testing
 
     @Test func aMissingBundledCopyCountsAsDamaged() async throws {
         #expect(await updater().firstLaunchableCopy() == nil)
+    }
+
+    // MARK: Mid-session
+
+    private static let active = "2026.10.27.000000"
+    private static let previous = "2026.10.26.220202"
+
+    /// An update model launched with every copy starting fine, then `breaking` copies that stop
+    /// starting (e.g. deleted or damaged on disk while the app is open).
+    @MainActor
+    private func launchedModel(thenBreak breaking: [String]) async throws -> YtDlpUpdateModel {
+        try download(Self.active, scenario: "success")
+        try download(Self.previous, scenario: "success")
+        try bundled(scenario: "success")
+        try setUp(active: Self.active, previous: Self.previous)
+        let model = YtDlpUpdateModel(updater: updater(), downloadsRunning: { false })
+        await model.launch()
+        model.stop()
+        #expect(model.current.version?.tag == Self.active)
+        for tag in breaking {
+            if tag == "bundled" { try bundled(scenario: "launch-crash") } else { try download(tag, scenario: "launch-crash") }
+        }
+        return model
+    }
+
+    @MainActor
+    private func queue(_ model: YtDlpUpdateModel) -> Queue {
+        Queue(runner: YtDlpRunner(tools: fake.tools, environment: fake.environment(scenario: "success"), selection: model.selection))
+    }
+
+    private var video: DownloadRequest {
+        DownloadRequest(
+            url: "https://www.youtube.com/watch?v=jNQXAC9IVRw", downloadFolder: fake.downloadFolder, options: .default,
+            origin: VideoOrigin(sourceKind: .video, videoID: "jNQXAC9IVRw")
+        )
+    }
+
+    @MainActor @Test func aCopyThatStopsStartingMidSessionFallsBackAndTheDownloadStillRuns() async throws {
+        let model = try await launchedModel(thenBreak: [Self.active])
+        let queue = queue(model)
+
+        queue.add(video)
+        await queue.waitUntilIdle()
+
+        #expect(queue.items.map(\.isFinished) == [true])
+        #expect(model.current.version?.tag == Self.previous)
+        #expect(!model.isDamaged)
+    }
+
+    @MainActor @Test func listingFallsBackToo() async throws {
+        let model = try await launchedModel(thenBreak: [Self.active, Self.previous])
+
+        let entries = try await SourceExpander(runner: queue(model).runner).expand(.playlist(id: "PLabc"))
+
+        #expect(entries.count == 3)
+        #expect(model.current.origin == .bundled)
+    }
+
+    @MainActor @Test func whenNoCopyStartsMidSessionTheAppIsDamaged() async throws {
+        let model = try await launchedModel(thenBreak: [Self.active, Self.previous, "bundled"])
+        let queue = queue(model)
+
+        queue.add(video)
+        await queue.waitUntilIdle()
+
+        #expect(queue.items.map(\.isFailed) == [true])
+        #expect(model.isDamaged)
+    }
+
+    @MainActor @Test(arguments: ["video-failure", "crash"])
+    func aFailingVideoIsNotALaunchFailure(scenario: String) async throws {
+        let model = try await launchedModel(thenBreak: [])
+        try download(Self.active, scenario: scenario)
+        let queue = queue(model)
+
+        queue.add(video)
+        await queue.waitUntilIdle()
+
+        #expect(queue.items.map(\.isFailed) == [true])
+        #expect(model.current.version?.tag == Self.active)
+        #expect(!model.isDamaged)
+    }
+
+    @MainActor @Test func downloadWaitsForTheLaunchCheck() async throws {
+        try bundled(scenario: "success")
+        let model = YtDlpUpdateModel(updater: updater(), downloadsRunning: { false })
+        let window = MainWindowModel(
+            queue: queue(model), settings: TestDefaults().relaunch(), ytDlpReady: { model.isReady }
+        )
+        window.pasteText = "https://www.youtube.com/watch?v=jNQXAC9IVRw"
+
+        #expect(!model.isReady)
+        #expect(!window.canDownload)
+        window.download()
+        #expect(window.queue.items.isEmpty)
+
+        await model.launch()
+        model.stop()
+
+        #expect(model.isReady)
+        #expect(window.canDownload)
     }
 }
 
