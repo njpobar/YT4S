@@ -1,9 +1,9 @@
 import SwiftUI
 import YT4SCore
 
-/// The one-column main window (prototype variant A, issue #9), top to bottom:
-/// paste box, Format row, [Naming pattern row: later ticket], Download folder + Download button,
-/// Queue, update footer.
+/// The one-column main window (prototype variant A, issue #9), top to bottom: Looks-outdated
+/// banner (when shown), paste box, Format row, Naming pattern row, Download folder + Download
+/// button, Queue, update footer.
 struct MainWindow: View {
     @Bindable var model: MainWindowModel
     let ytDlpUpdates: YtDlpUpdateModel
@@ -147,10 +147,7 @@ private struct NamingRow: View {
                 .labelsHidden()
                 .fixedSize()
                 if model.options.naming != .custom {
-                    Text("e.g. \(model.options.naming.example(format: model.options.format))")
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+                    ExampleName(model.options.naming.example(format: model.options.format))
                 }
                 Spacer(minLength: 0)
                 Toggle("Advanced", isOn: $model.advancedNaming)
@@ -179,17 +176,32 @@ private struct CustomPreviewLine: View {
         Group {
             switch preview {
             case .example(let name):
-                Text("e.g. \(name)").foregroundStyle(.secondary)
+                ExampleName(name)
             case .invalid(let reason):
-                Text(reason).foregroundStyle(.red)
+                Text(reason)
+                    .foregroundStyle(.red)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
             case nil:
-                Text("e.g. ...").foregroundStyle(.secondary)
+                ExampleName("...")
             }
         }
         .font(.callout)
-        .lineLimit(1)
-        .truncationMode(.middle)
         .textSelection(.enabled)
+    }
+}
+
+/// "e.g. My Video.mp4": an example file name for the chosen Naming pattern.
+private struct ExampleName: View {
+    let name: String
+
+    init(_ name: String) { self.name = name }
+
+    var body: some View {
+        Text("e.g. \(name)")
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .truncationMode(.middle)
     }
 }
 
@@ -217,8 +229,7 @@ private struct OutdatedBannerView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
-        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.orange.opacity(0.45)))
+        .boxed(fill: Color.orange.opacity(0.12), border: Color.orange.opacity(0.45))
     }
 }
 
@@ -234,8 +245,7 @@ private struct PasteBox: View {
             .padding(.horizontal, 4)
             .padding(.vertical, 6)
             .frame(height: 72)
-            .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
-            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color(nsColor: .separatorColor)))
+            .boxed(fill: Color(nsColor: .textBackgroundColor), border: Color(nsColor: .separatorColor))
             .overlay(alignment: .topLeading) {
                 if text.isEmpty {
                     Text("Paste a video, playlist or channel link (several links: one per line)")
@@ -248,154 +258,11 @@ private struct PasteBox: View {
     }
 }
 
-private struct QueueView: View {
-    let queue: Queue
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            if queue.items.isEmpty {
-                Text("Nothing here yet. Paste a link to start.")
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 30)
-                Spacer(minLength: 0)
-            } else {
-                let summary = QueueSummary(queue.items)
-                HStack(spacing: 10) {
-                    Text("Queue").fontWeight(.semibold)
-                    Text(summary.text)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                    Spacer()
-                    if summary.showsRetryAllFailed {
-                        Button("Retry all failed") { queue.retryAllFailed() }
-                            .controlSize(.small)
-                    }
-                    Button("Clear finished") { queue.clearFinished() }
-                        .controlSize(.small)
-                        .disabled(!summary.hasFinished)
-                }
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        ForEach(queue.items) { item in
-                            QueueRowView(row: QueueRow(item)) { action in
-                                perform(action, on: item.id)
-                            }
-                            Divider()
-                        }
-                    }
-                }
-            }
-        }
-        .frame(maxHeight: .infinity, alignment: .top)
-    }
-
-    private func perform(_ action: QueueRow.Action, on id: QueueItem.ID) {
-        switch action {
-        case .cancel: queue.cancel(id)
-        case .retry: queue.retry(id)
-        case .remove: queue.remove(id)
-        case .downloadAgain: queue.downloadAgain(id)
-        case .showInFinder(let file): NSWorkspace.shared.activateFileViewerSelecting([file])
-        }
-    }
-}
-
-private struct QueueRowView: View {
-    let row: QueueRow
-    let perform: (QueueRow.Action) -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 10) {
-                details
-                HStack(spacing: 6) {
-                    ForEach(row.actions, id: \.title) { action in
-                        Button(action.title) { perform(action) }
-                            .controlSize(.small)
-                    }
-                }
-            }
-            // Full row width, below the buttons, so opening it never moves Retry.
-            if let failureDetails = row.details {
-                FailureDetailsView(text: failureDetails)
-                    .padding(.top, -4)
-                    .padding(.bottom, 9)
-            }
-        }
-    }
-
-    private var details: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(row.title)
-                .fontWeight(.medium)
-                .lineLimit(1)
-                .truncationMode(.tail)
-            if row.showsProgress {
-                if let fraction = row.fraction {
-                    ProgressView(value: fraction).progressViewStyle(.linear)
-                } else {
-                    ProgressView().progressViewStyle(.linear)
-                }
-            }
-            Text(row.status)
-                .font(.caption)
-                .foregroundStyle(statusColor)
-                .monospacedDigit()
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 9)
-    }
-
-    private var statusColor: Color {
-        switch row.tone {
-        case .normal: .secondary
-        case .success: .green
-        case .failure: .red
-        case .skipped: .orange
-        }
-    }
-}
-
-/// The raw yt-dlp output of a failed row, collapsed under "Details", with Copy.
-private struct FailureDetailsView: View {
-    let text: String
-
-    var body: some View {
-        DisclosureGroup {
-            VStack(alignment: .leading, spacing: 6) {
-                ScrollView {
-                    Text(text.isEmpty ? "yt-dlp printed nothing." : text)
-                        .font(.system(.caption, design: .monospaced))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(6)
-                }
-                .frame(maxHeight: 120)
-                .background(Color(nsColor: .textBackgroundColor))
-                .clipShape(RoundedRectangle(cornerRadius: 4))
-                Button("Copy") {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(text, forType: .string)
-                }
-                .controlSize(.small)
-            }
-        } label: {
-            Text("Details").font(.caption)
-        }
-    }
-}
-
-private extension QueueRow.Action {
-    var title: String {
-        switch self {
-        case .cancel: "Cancel"
-        case .retry: "Retry"
-        case .remove: "Remove"
-        case .downloadAgain: "Download again"
-        case .showInFinder: "Show in Finder"
-        }
+private extension View {
+    /// The window's rounded box (paste box, banner): a 6 pt rounded fill with a hairline border.
+    func boxed(fill: Color, border: Color) -> some View {
+        background(fill, in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(border))
     }
 }
 
