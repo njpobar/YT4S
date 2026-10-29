@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// The `state.json` pointer next to the downloaded yt-dlp copies (ADR 0002).
 ///
@@ -215,5 +216,21 @@ public struct YtDlpInstallations: Sendable {
         for name in try FileManager.default.contentsOfDirectory(atPath: root.path) where !keep.contains(name) {
             try FileManager.default.removeItem(at: root.appendingPathComponent(name))
         }
+    }
+}
+
+/// The yt-dlp copy downloads run with right now, shared between the updater (which changes it
+/// at launch and after an update) and `YtDlpRunner` (which reads it at the start of each run).
+public final class YtDlpSelection: Sendable {
+    private let state: OSAllocatedUnfairLock<YtDlpCopy>
+
+    public init(_ copy: YtDlpCopy) {
+        state = OSAllocatedUnfairLock(initialState: copy)
+    }
+
+    public var copy: YtDlpCopy { state.withLock { $0 } }
+
+    public func select(_ copy: YtDlpCopy) {
+        state.withLock { $0 = copy }
     }
 }
