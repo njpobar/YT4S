@@ -31,7 +31,7 @@ enum LocalYtDlp {
 
 }
 
-@Suite(.enabled(if: LocalYtDlp.tools != nil))
+@Suite(.enabled(if: LocalYtDlp.tools != nil), .serialized)
 struct CustomNamePreviewTests {
     private func preview(_ template: String, format: Format = .video) async throws -> CustomNamePreview {
         await CustomNamePreviewer(runner: YtDlpRunner(tools: try #require(LocalYtDlp.tools))).preview(template, format: format)
