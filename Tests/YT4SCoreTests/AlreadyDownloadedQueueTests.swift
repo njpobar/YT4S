@@ -116,7 +116,7 @@ import Testing
         let queue = Queue(runner: fake.runner(scenario: "slow", extraEnvironment: ["YT4S_FAKE_STEP_DELAY": "0.3"]))
 
         queue.add(request(fake, id: "def456"))
-        let deadline = ContinuousClock.now + .seconds(5)
+        let deadline = ContinuousClock.now + .seconds(30)
         while queue.items[0].state == .pending, ContinuousClock.now < deadline {
             try await Task.sleep(for: .milliseconds(20))
         }

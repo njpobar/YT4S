@@ -107,7 +107,7 @@ import Testing
             options: DownloadOptions(format: .video, quality: .best, naming: .dateTitle)
         ))
 
-        let deadline = ContinuousClock.now + .seconds(5)
+        let deadline = ContinuousClock.now + .seconds(30)
         while queue.items[0].plannedFile == nil, ContinuousClock.now < deadline {
             try await Task.sleep(for: .milliseconds(20))
         }

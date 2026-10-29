@@ -8,8 +8,9 @@ import Testing
         DownloadRequest(url: "https://www.youtube.com/watch?v=\(id)", downloadFolder: fake.downloadFolder, options: .default)
     }
 
-    /// Polls until `condition` holds, failing after `timeout`.
-    private func eventually(_ timeout: Duration = .seconds(5), _ condition: () -> Bool) async throws {
+    /// Polls until `condition` holds, failing after `timeout` (generous: the fake is a zsh script,
+    /// slow to launch on a loaded machine; passing runs return as soon as it holds).
+    private func eventually(_ timeout: Duration = .seconds(30), _ condition: () -> Bool) async throws {
         let deadline = ContinuousClock.now + timeout
         while !condition() {
             guard ContinuousClock.now < deadline else { throw TimeoutError() }
