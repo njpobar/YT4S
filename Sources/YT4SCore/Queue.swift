@@ -1,86 +1,6 @@
 import Foundation
 import Observation
 
-/// Why a Queue item failed.
-public struct DownloadFailure: Equatable, Sendable {
-    /// How yt-dlp ended; `nil` when it could not be launched at all.
-    public var termination: SubprocessTermination?
-    /// Raw yt-dlp stderr (or the launch error), for the Details disclosure. Never shown in the row.
-    public var details: String
-    /// Derived from `details` and `termination`: decides the row sentence and whether Retry helps.
-    public var category: FailureCategory
-
-    public init(termination: SubprocessTermination?, details: String) {
-        self.termination = termination
-        self.details = details
-        category = FailureCategory(stderr: details, termination: termination)
-    }
-}
-
-public enum QueueItemState: Equatable, Sendable {
-    case pending
-    case running(DownloadProgress)
-    case finished(file: URL)
-    /// Skipped because its Format is already in the Download folder (set by skip detection, #24).
-    case alreadyDownloaded(file: URL)
-    case failed(DownloadFailure)
-    /// Stopped by the user before it finished; its partial files are gone.
-    case cancelled
-    /// Never run: the batch stopped early after 3 Looks-outdated failures in a row (#11). Retry resumes it.
-    case notStarted
-}
-
-/// One video in the Queue.
-public struct QueueItem: Identifiable, Equatable, Sendable {
-    public let id: UUID
-    /// What to download and how. Kept so Retry re-runs with the original choices.
-    public let request: DownloadRequest
-    /// From yt-dlp once it has looked the video up; `nil` until then.
-    public var title: String?
-    public var videoID: String?
-    public var state: QueueItemState
-    /// The file the video will be saved as (Naming pattern + collision rule), predicted once
-    /// yt-dlp has looked the video up and before it downloads; `nil` until then.
-    public var plannedFile: URL?
-    /// Set by Download again: skip detection leaves it alone and it is saved as a new file under
-    /// the collision rule, never over the copy already there.
-    public internal(set) var downloadAgain = false
-
-    public init(id: UUID = UUID(), request: DownloadRequest, title: String? = nil, videoID: String? = nil, state: QueueItemState = .pending) {
-        self.id = id
-        self.request = request
-        self.title = title
-        self.videoID = videoID
-        self.state = state
-    }
-
-    public var isFinished: Bool { if case .finished = state { true } else { false } }
-    public var isFailed: Bool { if case .failed = state { true } else { false } }
-    /// What Retry accepts: a cancelled row, or a failure that can succeed again.
-    public var isRetryable: Bool {
-        switch state {
-        case .failed(let failure): failure.category.isRetryable
-        case .cancelled, .notStarted: true
-        case .pending, .running, .finished, .alreadyDownloaded: false
-        }
-    }
-    /// Waiting or running: yt-dlp has work left to do for it.
-    public var isActive: Bool {
-        switch state {
-        case .pending, .running: true
-        case .finished, .alreadyDownloaded, .failed, .cancelled, .notStarted: false
-        }
-    }
-
-    /// Finished or Already downloaded: what "Clear finished" removes.
-    public var isDone: Bool {
-        switch state {
-        case .finished, .alreadyDownloaded: true
-        case .pending, .running, .failed, .cancelled, .notStarted: false
-        }
-    }
-}
-
 /// The visible list of pending, running, finished and failed downloads.
 ///
 /// Videos run one at a time, in the order added, each as one yt-dlp run built by
@@ -103,14 +23,8 @@ public final class Queue {
     /// What each Download folder already holds, scanned once per batch (a worker run) and kept up
     /// to date with what the batch saves. The folder is the only record (no ledger).
     @ObservationIgnored private var savedFiles: [URL: [SavedVideo: URL]] = [:]
-
-    /// Whether the Looks-outdated banner shows (`OutdatedBanner`): 2 or more videos of the batch
-    /// failed as Looks outdated, or the batch was a single video that did.
-    public private(set) var showsOutdatedBanner = false
-    /// The items queued or retried since the Queue was last idle.
-    @ObservationIgnored private var batch: Set<QueueItem.ID> = []
-    @ObservationIgnored private var batchOutdatedFailures = 0
-    @ObservationIgnored private var consecutiveOutdatedFailures = 0
+    /// The Looks-outdated banner and early stop.
+    private var outdated = OutdatedBatch()
 
     /// - Parameter partialFilesFolder: where yt-dlp keeps unfinished files (`-P temp:`), one
     ///   subfolder per item, so they never show up in the Download folder and Cancel / Retry can
@@ -130,6 +44,14 @@ public final class Queue {
         FileManager.default.temporaryDirectory.appendingPathComponent("YT4S-partial", isDirectory: true)
     }
 
+    /// Whether the Looks-outdated banner shows (`OutdatedBanner`): 2 or more videos of the batch
+    /// failed as Looks outdated, or the batch was a single video that did.
+    public var showsOutdatedBanner: Bool { outdated.showsBanner }
+
+    public func item(_ id: QueueItem.ID) -> QueueItem? {
+        items.first { $0.id == id }
+    }
+
     /// At launch, before anything downloads: removes what a quit mid-download left behind, i.e.
     /// yt-dlp's unfinished output in `downloadFolder` (only its hidden incomplete folder) and
     /// every partial file. Does nothing while the Queue runs.
@@ -144,7 +66,7 @@ public final class Queue {
     public func add(_ request: DownloadRequest) -> QueueItem.ID {
         let item = QueueItem(request: request, title: request.origin.title, videoID: request.origin.videoID)
         items.append(item)
-        joinBatch(item.id)
+        outdated.join(item.id, startsNewBatch: isIdle)
         skipIfAlreadyDownloaded(item.id)
         startWorkerIfNeeded()
         return item.id
@@ -153,7 +75,7 @@ public final class Queue {
     /// Downloads an Already downloaded item anyway, as a new file under the collision rule
     /// (the copy already there is kept). No effect on other states.
     public func downloadAgain(_ id: QueueItem.ID) {
-        guard case .alreadyDownloaded = items.first(where: { $0.id == id })?.state else { return }
+        guard item(id)?.isAlreadyDownloaded == true else { return }
         update(id) { $0.downloadAgain = true; $0.state = .pending }
         startWorkerIfNeeded()
     }
@@ -168,13 +90,12 @@ public final class Queue {
 
     public var isIdle: Bool { worker == nil }
 
-    /// True while any video is waiting or running. Derived from `items`, so it is observable:
-    /// both footer update buttons disable themselves on it (ADR 0002).
+    /// True while any video is waiting or running. Derived from `items`, so it is observable.
     public var hasActiveDownloads: Bool { items.contains(where: \.isActive) }
 
     /// Stops a pending or running item and deletes its partial files. No effect on other states.
     public func cancel(_ id: QueueItem.ID) {
-        guard let item = items.first(where: { $0.id == id }) else { return }
+        guard let item = item(id) else { return }
         switch item.state {
         case .pending:
             update(id) { $0.state = .cancelled }
@@ -194,8 +115,7 @@ public final class Queue {
 
     /// The banner's X. It shows again only after new Looks-outdated failures.
     public func dismissOutdatedBanner() {
-        showsOutdatedBanner = false
-        batchOutdatedFailures = 0
+        outdated.dismissBanner()
     }
 
     /// Removes one row that is not waiting or running. Files on disk are never touched.
@@ -207,10 +127,10 @@ public final class Queue {
     /// Naming pattern, Download folder), deleting its partial files first. No effect on other states.
     /// Failures that cannot succeed again (Unavailable, Region-blocked) are left alone too.
     public func retry(_ id: QueueItem.ID) {
-        guard let item = items.first(where: { $0.id == id }), item.isRetryable else { return }
+        guard let item = item(id), item.isRetryable else { return }
         deletePartialFiles(partialFilesFolder(for: id))
         update(id) { $0.state = .pending }
-        joinBatch(id)
+        outdated.join(id, startsNewBatch: isIdle)
         startWorkerIfNeeded()
     }
 
@@ -246,6 +166,15 @@ public final class Queue {
         }
     }
 
+    /// Applies the Looks-outdated rules to an item that just stopped running; an early stop
+    /// leaves every waiting video Not started.
+    private func recordOutcome(_ id: QueueItem.ID) {
+        guard let item = item(id), outdated.record(item, in: items) else { return }
+        for index in items.indices where items[index].state == .pending {
+            items[index].state = .notStarted
+        }
+    }
+
     /// Scans, off the main actor, each Download folder a pending item uses and this batch has not
     /// scanned yet.
     private func scanDownloadFolders() async {
@@ -259,7 +188,7 @@ public final class Queue {
     /// Format (under any name, Quality preset or Naming pattern). Needs the folder scanned this
     /// batch; a file gone since the scan does not count.
     private func skipIfAlreadyDownloaded(_ id: QueueItem.ID) {
-        guard let item = items.first(where: { $0.id == id }), item.state == .pending, !item.downloadAgain,
+        guard let item = item(id), item.state == .pending, !item.downloadAgain,
               let videoID = item.request.origin.videoID else { return }
         let folder = item.request.downloadFolder
         let video = SavedVideo(videoID: videoID, format: item.request.options.format)
@@ -275,8 +204,7 @@ public final class Queue {
     /// row shows it. The row stays running meanwhile, and Cancel still stops it.
     private func download(_ id: QueueItem.ID) async {
         await attempt(id)
-        guard case .failed(let failure) = items.first(where: { $0.id == id })?.state,
-              failure.category == .network, !Task.isCancelled else { return }
+        guard case .failed(let failure) = item(id)?.state, failure.category == .network, !Task.isCancelled else { return }
         update(id) { $0.state = .running(DownloadProgress()) }
         do {
             try await Task.sleep(for: networkRetryDelay)
@@ -287,70 +215,46 @@ public final class Queue {
         await attempt(id)
     }
 
-    private func attempt(_ id: QueueItem.ID) async {
-        guard let item = items.first(where: { $0.id == id }) else { return }
-        let request = item.request
-        let downloadAgain = item.downloadAgain
+    /// What one yt-dlp run of an item has reported so far.
+    private struct Attempt {
+        let request: DownloadRequest
+        let downloadAgain: Bool
         var progress = DownloadProgress()
+        /// yt-dlp's finished output in the incomplete folder, until it is placed.
         var file: URL?
-        var details: VideoDetails?
-        let downloadFolder = DownloadFolder(url: request.downloadFolder)
-        update(id) { $0.state = .running(progress) }
+        /// The video as yt-dlp looked it up, and its skip key.
+        private(set) var video: (details: VideoDetails, saved: SavedVideo)?
+
+        var downloadFolder: DownloadFolder { DownloadFolder(url: request.downloadFolder) }
+
+        @discardableResult
+        mutating func lookedUp(_ details: VideoDetails) -> SavedVideo {
+            let saved = SavedVideo(videoID: details.id, format: request.options.format)
+            video = (details, saved)
+            return saved
+        }
+    }
+
+    /// One yt-dlp run of an item, from start to its final state.
+    private func attempt(_ id: QueueItem.ID) async {
+        guard let item = item(id) else { return }
+        var attempt = Attempt(request: item.request, downloadAgain: item.downloadAgain)
+        update(id) { $0.state = .running(attempt.progress) }
         let partialFiles = partialFilesFolder(for: id)
         deletePartialFiles(partialFiles)
         defer {
             deletePartialFiles(partialFiles)
-            if let file { downloadFolder.discardIncomplete(file) }
+            if let file = attempt.file { attempt.downloadFolder.discardIncomplete(file) }
             // A cancelled run may end in an error or in nothing at all; only a finish beats Cancel.
             if Task.isCancelled { update(id) { if !$0.isDone { $0.state = .cancelled } } }
         }
 
         do {
-            let arguments = ["-P", "temp:" + partialFiles.path] + DownloadArguments.arguments(for: request)
+            let arguments = ["-P", "temp:" + partialFiles.path] + DownloadArguments.arguments(for: attempt.request)
             for try await update in runner.run(arguments) {
                 switch update {
-                case .event(let event):
-                    progress.apply(event)
-                    switch event {
-                    case .video(let info):
-                        self.update(id) { $0.title = info.title; $0.videoID = info.id }
-                        details = details ?? VideoDetails(id: info.id, title: info.title)
-                    case .details(let video):
-                        details = video
-                        let planned = downloadFolder.plannedFile(
-                            request.namePlan(for: video), video: SavedVideo(videoID: video.id, format: request.options.format),
-                            fileExtension: request.expectedFileExtension, downloadAgain: downloadAgain
-                        )
-                        self.update(id) { $0.title = video.title; $0.videoID = video.id; $0.plannedFile = planned }
-                    case .file(_, let path):
-                        file = URL(fileURLWithPath: path)
-                    case .progress, .entry:
-                        break
-                    }
-                    self.update(id) { $0.state = .running(progress) }
-                case .exited(let exit):
-                    guard exit.succeeded, let downloaded = file else {
-                        self.update(id) { $0.state = .failed(DownloadFailure(termination: exit.termination, details: exit.stderr)) }
-                        break
-                    }
-                    let video = details ?? VideoDetails(id: request.origin.videoID ?? "video", title: request.origin.title ?? "")
-                    do {
-                        // The collision rule is applied again against the folder as it is now.
-                        let saved = SavedVideo(videoID: video.id, format: request.options.format)
-                        switch try downloadFolder.place(downloaded, plan: request.namePlan(for: video), video: saved, downloadAgain: downloadAgain) {
-                        case .placed(let placed):
-                            file = nil
-                            if savedFiles[request.downloadFolder]?[saved] == nil {
-                                savedFiles[request.downloadFolder]?[saved] = placed
-                            }
-                            self.update(id) { $0.plannedFile = placed; $0.state = .finished(file: placed) }
-                        case .alreadyThere(let existing):
-                            // Saved meanwhile (e.g. listed twice in this batch): never overwritten.
-                            self.update(id) { $0.plannedFile = existing; $0.state = .alreadyDownloaded(file: existing) }
-                        }
-                    } catch {
-                        self.update(id) { $0.state = .failed(DownloadFailure(termination: exit.termination, details: String(describing: error))) }
-                    }
+                case .event(let event): apply(event, to: &attempt, of: id)
+                case .exited(let exit): finish(id, &attempt, exit: exit)
                 }
             }
         } catch {
@@ -358,40 +262,55 @@ public final class Queue {
         }
     }
 
-    /// Batch items yt-dlp was asked to download: Already downloaded ones were skipped.
-    private var videosRunInBatch: Int {
-        items.count { batch.contains($0.id) && !isAlreadyDownloaded($0) }
-    }
-
-    private func isAlreadyDownloaded(_ item: QueueItem) -> Bool {
-        if case .alreadyDownloaded = item.state { true } else { false }
-    }
-
-    /// An item queued or retried while the Queue is idle starts a new batch.
-    private func joinBatch(_ id: QueueItem.ID) {
-        if worker == nil {
-            batch = []
-            batchOutdatedFailures = 0
-            consecutiveOutdatedFailures = 0
+    private func apply(_ event: YtDlpEvent, to attempt: inout Attempt, of id: QueueItem.ID) {
+        attempt.progress.apply(event)
+        switch event {
+        case .video(let info):
+            update(id) { $0.title = info.title; $0.videoID = info.id }
+            if attempt.video == nil { attempt.lookedUp(VideoDetails(id: info.id, title: info.title)) }
+        case .details(let details):
+            let saved = attempt.lookedUp(details)
+            let planned = attempt.downloadFolder.plannedFile(
+                attempt.request.namePlan(for: details), video: saved,
+                fileExtension: attempt.request.expectedFileExtension, downloadAgain: attempt.downloadAgain
+            )
+            update(id) { $0.title = details.title; $0.videoID = details.id; $0.plannedFile = planned }
+        case .file(_, let path):
+            attempt.file = URL(fileURLWithPath: path)
+        case .progress, .entry:
+            break
         }
-        batch.insert(id)
+        update(id) { [progress = attempt.progress] in $0.state = .running(progress) }
     }
 
-    /// Applies the Looks-outdated rules (#11) to an item that just stopped running: the banner,
-    /// and the early stop after 3 in a row, which leaves every waiting video Not started.
-    private func recordOutcome(_ id: QueueItem.ID) {
-        guard case .failed(let failure) = items.first(where: { $0.id == id })?.state,
-              failure.category == .looksOutdated else {
-            consecutiveOutdatedFailures = 0
+    /// yt-dlp ended: a success is moved from the incomplete folder to its Naming pattern name
+    /// (the collision rule applied again against the folder as it is now) and tagged; anything
+    /// else fails the row.
+    private func finish(_ id: QueueItem.ID, _ attempt: inout Attempt, exit: YtDlpExit) {
+        guard exit.succeeded, let downloaded = attempt.file else {
+            update(id) { $0.state = .failed(DownloadFailure(termination: exit.termination, details: exit.stderr)) }
             return
         }
-        batchOutdatedFailures += 1
-        consecutiveOutdatedFailures += 1
-        if batchOutdatedFailures >= 2 || videosRunInBatch == 1 { showsOutdatedBanner = true }
-        if consecutiveOutdatedFailures >= 3 {
-            for index in items.indices where items[index].state == .pending {
-                items[index].state = .notStarted
+        if attempt.video == nil {
+            // No lookup line arrived; the output's own name is the video ID (`DownloadArguments.outputTemplate`).
+            attempt.lookedUp(VideoDetails(id: DownloadArguments.videoID(ofOutput: downloaded), title: attempt.request.origin.title ?? ""))
+        }
+        guard let (details, saved) = attempt.video else { return }
+        do {
+            switch try attempt.downloadFolder.place(
+                downloaded, plan: attempt.request.namePlan(for: details), video: saved, downloadAgain: attempt.downloadAgain
+            ) {
+            case .placed(let placed):
+                attempt.file = nil
+                let folder = attempt.request.downloadFolder
+                if savedFiles[folder]?[saved] == nil { savedFiles[folder]?[saved] = placed }
+                update(id) { $0.plannedFile = placed; $0.state = .finished(file: placed) }
+            case .alreadyThere(let existing):
+                // Saved meanwhile (e.g. listed twice in this batch): never overwritten.
+                update(id) { $0.plannedFile = existing; $0.state = .alreadyDownloaded(file: existing) }
             }
+        } catch {
+            update(id) { $0.state = .failed(DownloadFailure(termination: exit.termination, details: String(describing: error))) }
         }
     }
 

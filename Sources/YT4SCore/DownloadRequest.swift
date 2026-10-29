@@ -165,4 +165,9 @@ public enum DownloadArguments {
     /// yt-dlp never picks the final name: it downloads to `<id>.<ext>` in the hidden incomplete
     /// folder and the Queue moves the file to its Naming pattern name (see `DownloadFolder`).
     static let outputTemplate = "\(DownloadFolder.incompleteFolderName)/%(id)s.%(ext)s"
+
+    /// The video ID in the name `outputTemplate` gave a downloaded file.
+    static func videoID(ofOutput file: URL) -> String {
+        file.deletingPathExtension().lastPathComponent
+    }
 }
