@@ -1,0 +1,5 @@
+# Sparkle EdDSA public key (SUPublicEDKey), base64, on the line below this comment.
+# Created by Nick with generate_keys; the private half is in his login Keychain (see README.md, "Signing key for app updates").
+# scripts/write-info-plist.sh bakes it into the app; release.sh refuses to run while it is empty
+# or when it does not match the private key in the login Keychain.
+Qtz2Q6tAstA4xOsEPXY+CXxl28OBsO2t3Fd8dhJR3Rw=

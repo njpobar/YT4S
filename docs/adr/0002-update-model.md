@@ -25,6 +25,10 @@ The app checks for both on launch and, if left open, once a day; a found update 
 - Keep the active copy plus exactly one previous.
   Rollback swaps the pointer, works offline, and pins the older version until the user clicks Update again, so the launch check does not re-offer the bad one.
   The fallback chain is active, previous, bundled.
+  When no downloaded previous copy exists (after the first update, or once the previous one was pruned as older than bundled), Roll back returns to the bundled copy, so a bad first nightly can be undone offline.
+  In `state.json` an empty `active` means the bundled copy is in use; after Roll back is used, Roll back stays disabled until the next Update click (only one step back).
+  Launch failures fall back down the chain, at launch and whenever the copy in use fails to start mid-session (that run is then retried on the next copy); each copy is tried with `--version`.
+  If none starts, the window shows only "YT4S is damaged. Reinstall the app." with Update app.
 - At launch the app uses whichever is newer, the downloaded active copy or the bundled one, and prunes downloaded copies older than the bundled one.
 - Deno and ffmpeg/ffprobe are pinned per app release and are not touched by the button.
 - yt-dlp is always invoked with `--ignore-config --no-update --ffmpeg-location ... --js-runtimes deno:...`.
