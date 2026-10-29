@@ -1,0 +1,98 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>YT4S main window PROTOTYPE</title>
+<!-- PROTOTYPE, throwaway. Question: what should YT4S's main window look like for Sarah?
+     3 structurally different variants, switch with the bottom bar or left/right arrow keys (?v=A|B|C). -->
+<style>
+*{box-sizing:border-box}body{margin:0;font:14px -apple-system,system-ui,sans-serif;background:#d8d8dc;color:#1d1d1f;padding:24px 0 80px}
+.win{width:860px;margin:0 auto;background:#fff;border-radius:12px;box-shadow:0 20px 60px #0004;overflow:hidden;min-height:560px;position:relative}
+.bar{height:38px;background:#ececec;border-bottom:1px solid #d0d0d0;display:flex;align-items:center;padding:0 14px;gap:8px;font-weight:600;color:#555}
+.dot{width:12px;height:12px;border-radius:50%;background:#ff5f57}.dot:nth-child(2){background:#febc2e}.dot:nth-child(3){background:#28c840}
+button,select,input,textarea{font:inherit}
+button{border:1px solid #c4c4c8;background:#fff;border-radius:6px;padding:5px 11px;cursor:pointer}button:hover{background:#f2f2f4}
+button.pri{background:#0a7aff;color:#fff;border-color:#0a7aff;font-weight:600;padding:8px 18px}button.pri:hover{background:#006be0}
+button.sm{padding:2px 8px;font-size:12px}
+textarea,input[type=text]{width:100%;border:1px solid #c4c4c8;border-radius:6px;padding:8px}
+.seg{display:inline-flex;border:1px solid #c4c4c8;border-radius:6px;overflow:hidden}.seg button{border:0;border-radius:0;border-right:1px solid #c4c4c8}.seg button:last-child{border:0}.seg .on{background:#0a7aff;color:#fff}
+.muted{color:#777;font-size:12px}.row{display:flex;gap:10px;align-items:center}.pad{padding:18px}
+.item{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid #eee}
+.thumb{width:56px;height:32px;background:#ccd;border-radius:4px;flex:none}
+.grow{flex:1;min-width:0}.t{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500}
+.prog{height:5px;background:#e5e5ea;border-radius:3px;margin-top:5px;overflow:hidden}.prog i{display:block;height:100%;background:#0a7aff}
+.ok{color:#1a8f3c}.bad{color:#d00}.skip{color:#a60}
+.upd{display:flex;gap:8px;align-items:center;font-size:12px;color:#777}
+.lbl{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#888;margin:14px 0 5px}
+#switch{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#111;color:#fff;border-radius:20px;padding:6px 14px;display:flex;gap:14px;align-items:center;z-index:9}
+#switch button{background:none;color:#fff;border:0;font-size:16px}
+.side{width:230px;border-right:1px solid #e5e5e5;background:#f6f6f8;padding:16px;flex:none}
+.flex{display:flex;min-height:522px}
+.drop{border:2px dashed #b9b9c4;border-radius:12px;padding:34px;text-align:center;background:#fafafc}
+.modal{position:absolute;inset:0;background:#0006;display:flex;align-items:center;justify-content:center}.modal>div{background:#fff;border-radius:10px;padding:20px;width:420px}
+</style></head><body>
+<div class="win"><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span style="margin-left:10px">YT4S</span></div><div id="root"></div><div id="modal"></div></div>
+<div id="switch"><button onclick="step(-1)">‹</button><span id="vl"></span><button onclick="step(1)">›</button></div>
+<script>
+const S={fmt:'video',q:'Best',nm:'Title',folder:'~/Downloads/YT4S',adv:false,custom:'%(uploader)s/%(title)s.%(ext)s',src:'',
+ ytdlp:'2026.10.12',ytNew:true,appNew:false,items:[],id:0,detect:null};
+const NAMES={Title:'My Video.mp4','Channel - Title':'Some Channel - My Video.mp4','Date - Title':'2026-10-12 - My Video.mp4'};
+const TITLES=['How to bake sourdough','Cat falls off table (original)','Lo-fi beats to study to','Fixing a bike chain in 5 min','Mountain hike vlog #12','Why the sky is blue','Best pasta of my life','Garden tour 2026'];
+function parse(t){const ls=t.split(/\s+/).filter(Boolean);if(!ls.length)return null;
+ if(ls.length>1)return{kind:'links',n:ls.length,label:ls.length+' links'};
+ const u=ls[0];if(/list=|playlist/.test(u))return{kind:'playlist',n:12,label:'Playlist, 12 videos'};
+ if(/\/@|\/channel\//.test(u))return{kind:'channel',n:48,label:'Channel, 48 videos'};
+ if(/youtu/.test(u))return{kind:'video',n:1,label:'1 video'};return{kind:'bad',n:0,label:"That doesn't look like a YouTube link"}}
+function add(){const d=parse(S.src);if(!d||d.kind==='bad')return;
+ const n=Math.min(d.n,6);for(let i=0;i<n;i++){const j=S.id++;S.items.push({id:j,title:TITLES[j%TITLES.length],st:(i===2&&d.kind!=='video')?'skipped':(i===4?'failed':'queued'),pct:0,sub:d.kind==='channel'?'Channel / ':d.kind==='playlist'?'Playlist / ':''})}
+ S.src='';draw()}
+function act(id,a){const it=S.items.find(x=>x.id===id);if(a==='cancel'){it.st='cancelled'}if(a==='retry'||a==='again'){it.st='queued';it.pct=0}if(a==='remove')S.items=S.items.filter(x=>x!==it);paintQ()}
+setInterval(()=>{let r=S.items.find(x=>x.st==='running');if(!r){r=S.items.find(x=>x.st==='queued');if(r)r.st='running'}
+ if(r){r.pct+=9;if(r.pct>=100){r.pct=100;r.st=(r.title.includes('Cat')?'failed':'done')}}paintQ()},500);
+function itemHTML(it){const f=S.fmt==='video'?S.q:'MP3';let s='',b='';
+ if(it.st==='running'){s=`<div class="prog"><i style="width:${it.pct}%"></i></div><div class="muted">${it.pct}% - ${(it.pct*0.4).toFixed(1)} MB - ${(3.2).toFixed(1)} MB/s - ${Math.round((100-it.pct)/9*.5)}s left</div>`;b=`<button class="sm" onclick="act(${it.id},'cancel')">Cancel</button>`}
+ else if(it.st==='queued'){s='<div class="muted">Waiting</div>';b=`<button class="sm" onclick="act(${it.id},'cancel')">Cancel</button>`}
+ else if(it.st==='done'){s='<div class="ok">✓ Done</div>';b=`<button class="sm" onclick="alert('Reveal in Finder')">Show in Finder</button>`}
+ else if(it.st==='failed'){s='<div class="bad">Failed: video is private or removed</div>';b=`<button class="sm" onclick="act(${it.id},'retry')">Retry</button>`}
+ else if(it.st==='skipped'){s='<div class="skip">Already downloaded</div>';b=`<button class="sm" onclick="act(${it.id},'again')">Download again</button>`}
+ else{s='<div class="muted">Cancelled</div>';b=`<button class="sm" onclick="act(${it.id},'retry')">Retry</button> <button class="sm" onclick="act(${it.id},'remove')">Remove</button>`}
+ return `<div class="item"><div class="thumb"></div><div class="grow"><div class="t">${it.sub}${it.title}</div>${s}</div><div>${b}</div></div>`}
+function queueHTML(){if(!S.items.length)return '<div class="muted" style="padding:30px;text-align:center">Nothing here yet. Paste a link to start.</div>';
+ const run=S.items.filter(x=>x.st==='running'||x.st==='queued').length;
+ return `<div class="row" style="justify-content:space-between;margin-bottom:4px"><b>Queue</b><span class="muted">${run} active</span><span><button class="sm" onclick="S.items=S.items.filter(x=>['running','queued'].includes(x.st));paintQ()">Clear finished</button></span></div>`+S.items.map(itemHTML).join('')}
+function paintQ(){document.querySelectorAll('.q').forEach(e=>e.innerHTML=queueHTML())}
+// shared bits
+function seg(key,opts){return `<span class="seg">${opts.map(o=>`<button class="${S[key]===o?'on':''}" onclick="S.${key}='${o}';draw()">${o}</button>`).join('')}</span>`}
+function fmtRow(){return `<div class="row">${seg('fmt',['video','MP3'])}${S.fmt==='video'?seg('q',['Best','1080p','720p']):'<span class="muted">High quality, with cover art</span>'}</div>`}
+function nameRow(){return `<div class="row"><select onchange="S.nm=this.value;draw()">${Object.keys(NAMES).map(n=>`<option ${S.nm===n?'selected':''}>${n}</option>`).join('')}<option ${S.nm==='Custom'?'selected':''}>Custom...</option></select><span class="muted">e.g. ${NAMES[S.nm]||S.custom}</span></div>`+(S.nm==='Custom'?`<input type="text" style="margin-top:6px" value="${S.custom}" oninput="S.custom=this.value"><div class="muted">Advanced: yt-dlp template. Preview updates live.</div>`:'')}
+function folderRow(){return `<div class="row"><code>${S.folder}</code><button class="sm" onclick="alert('Folder picker')">Choose...</button></div>`}
+function detect(){const d=parse(S.src);return d?`<div class="muted" style="margin-top:5px">${d.kind==='bad'?'<span class=bad>'+d.label+'</span>':'Detected: '+d.label}</div>`:''}
+function srcBox(rows,ph){return `<textarea rows="${rows}" placeholder="${ph}" oninput="S.src=this.value;document.getElementById('det').innerHTML=detect()">${S.src}</textarea><div id="det">${detect()}</div>`}
+function updates(){return `<div class="upd"><span>yt-dlp ${S.ytdlp}</span><button class="sm" onclick="upd('yt')">${S.ytNew?'Update yt-dlp ●':'Update yt-dlp'}</button><button class="sm" onclick="upd('rb')">Roll back</button><span style="width:10px"></span><span>YT4S 1.0</span><button class="sm" onclick="upd('app')">${S.appNew?'Update app ●':'Update app'}</button></div>`}
+function upd(w){const m=document.getElementById('modal');const msg={yt:'Update yt-dlp to 2026.10.28?<br><span class=muted>Fixes: YouTube changes. Takes a few seconds.</span>',rb:'Go back to yt-dlp 2026.09.30 (last version that worked)?',app:'No app update available. You are on the latest YT4S.'}[w];
+ m.innerHTML=`<div class="modal"><div>${msg}<div class="row" style="justify-content:flex-end;margin-top:16px"><button onclick="document.getElementById('modal').innerHTML=''">${w==='app'?'OK':'Cancel'}</button>${w==='app'?'':`<button class="pri" onclick="S.ytNew=false;S.ytdlp='2026.10.28';document.getElementById('modal').innerHTML='';draw()">Update</button>`}</div></div></div>`}
+function nudge(){return S.items.some(x=>x.st==='failed')?`<div style="background:#fff4e5;border:1px solid #f0c27b;border-radius:6px;padding:8px 12px;margin-bottom:10px" class="row"><span class="grow">Some downloads failed. YouTube may have changed - try updating yt-dlp.</span><button class="sm" onclick="upd('yt')">Update yt-dlp</button></div>`:''}
+
+// A: single column, top to bottom. Set-and-go.
+function A(){return `<div class="pad">${nudge()}${srcBox(3,'Paste a video, playlist or channel link (several links: one per line)')}
+ <div class="row" style="margin-top:12px;flex-wrap:wrap;gap:22px"><div><div class="lbl">Get</div>${fmtRow()}</div><div><div class="lbl">File names</div>${nameRow()}</div></div>
+ <div class="row" style="justify-content:space-between;margin-top:14px"><div><div class="lbl" style="margin-top:0">Save to</div>${folderRow()}</div><button class="pri" onclick="add()">Download</button></div>
+ <hr style="border:0;border-top:1px solid #eee;margin:16px 0 8px"><div class="q">${queueHTML()}</div>
+ <div style="margin-top:14px">${updates()}</div></div>`}
+// B: sidebar of settings, big queue as the main thing
+function B(){return `<div class="flex"><div class="side"><div class="lbl" style="margin-top:0">Format</div>${fmtRow()}<div class="lbl">File names</div>${nameRow()}<div class="lbl">Save to</div>${folderRow()}<div style="margin-top:auto"></div><div style="margin-top:70px">${updates()}</div></div>
+ <div class="grow pad">${nudge()}<div class="row"><input type="text" placeholder="Paste a link" value="${S.src.split('\n')[0]}" oninput="S.src=this.value;document.getElementById('det').innerHTML=detect()" onkeydown="if(event.key==='Enter')add()"><button class="pri" onclick="add()">Add</button></div><div id="det">${detect()}</div>
+ <div class="q" style="margin-top:12px">${queueHTML()}</div></div></div>`}
+// C: big drop zone, settings collapsed into one sentence, queue in drawer
+function C(){const open=S.open;return `<div class="pad">${nudge()}<div class="drop"><div style="font-size:18px;margin-bottom:10px">Drop or paste a YouTube link</div><input type="text" style="max-width:520px" placeholder="https://youtube.com/..." value="${S.src.split('\n')[0]}" oninput="S.src=this.value;document.getElementById('det').innerHTML=detect()" onkeydown="if(event.key==='Enter')add()"><div id="det">${detect()}</div>
+ <div style="margin-top:14px;font-size:15px">Save as <b>${S.fmt==='video'?S.q+' video':'MP3'}</b>, named <b>${S.nm}</b>, into <b>${S.folder.split('/').pop()}</b> <button class="sm" onclick="S.open=!S.open;draw()">${open?'Done':'Change'}</button></div>
+ ${open?`<div style="text-align:left;max-width:520px;margin:12px auto 0"><div class="lbl">Format</div>${fmtRow()}<div class="lbl">File names</div>${nameRow()}<div class="lbl">Save to</div>${folderRow()}</div>`:''}
+ <div style="margin-top:16px"><button class="pri" onclick="add()">Download</button></div></div>
+ <div class="q" style="margin-top:16px;max-height:230px;overflow:auto">${queueHTML()}</div>
+ <div style="margin-top:12px;text-align:center">${updates()}</div></div>`}
+const V={A,B,C},NM={A:'A: One column',B:'B: Settings sidebar + queue',C:'C: Drop zone, settings hidden'};
+let cur=new URLSearchParams(location.search).get('v')||'A';
+function draw(){document.getElementById('root').innerHTML=V[cur]();document.getElementById('vl').textContent=NM[cur];
+ history.replaceState(0,'','?v='+cur)}
+function step(d){const k=Object.keys(V);cur=k[(k.indexOf(cur)+d+k.length)%k.length];draw()}
+addEventListener('keydown',e=>{if(/INPUT|TEXTAREA|SELECT/.test(e.target.tagName))return;if(e.key==='ArrowLeft')step(-1);if(e.key==='ArrowRight')step(1)});
+S.items=[{id:100,title:'Lo-fi beats to study to',st:'done',pct:100,sub:''},{id:101,title:'Garden tour 2026',st:'running',pct:30,sub:''},{id:102,title:'Why the sky is blue',st:'skipped',pct:0,sub:''}];
+draw();
+</script></body></html>
