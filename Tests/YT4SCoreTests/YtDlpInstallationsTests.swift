@@ -225,4 +225,101 @@ import Testing
 
         #expect(chain.map(\.origin) == [.bundled])
     }
+
+    // MARK: Roll back
+
+    private var bundledCopy: YtDlpCopy {
+        YtDlpCopy(version: YtDlpVersion("2026.10.20"), executable: bundledExecutable, origin: .bundled)
+    }
+
+    @Test func afterTheFirstUpdateRollBackReturnsToTheBundledCopyAndPinsIt() throws {
+        let installations = installations()
+        let staging = try stage("2026.10.26.220202", in: installations)
+        _ = try installations.install(staging, as: #require(YtDlpVersion("2026.10.26.220202")))
+        #expect(installations.rollBackTarget() == bundledCopy)
+
+        let copy = try installations.rollBack()
+
+        #expect(copy == bundledCopy)
+        #expect(installations.current() == bundledCopy)
+        #expect(installations.readState() == YtDlpState(active: nil, previous: "2026.10.26.220202", pinned: true))
+        // The copy rolled back from is kept, so Update yt-dlp can return to it.
+        #expect(try downloadedTags() == ["2026.10.26.220202"])
+    }
+
+    @Test func rollBackSwapsToThePreviousDownloadAndKeepsTheNewerOneAsPrevious() throws {
+        try download("2026.10.26.220202")
+        try download("2026.10.27.000000")
+        try writeState(#"{"active": "2026.10.27.000000", "previous": "2026.10.26.220202"}"#)
+        let installations = installations()
+
+        let copy = try installations.rollBack()
+
+        #expect(copy.version?.tag == "2026.10.26.220202")
+        #expect(copy.origin == .downloaded)
+        #expect(installations.readState() == YtDlpState(active: "2026.10.26.220202", previous: "2026.10.27.000000", pinned: true))
+        #expect(try installations.prepareAtLaunch() == copy)
+    }
+
+    @Test func thereIsNothingToRollBackToOnTheBundledCopyOrWhilePinned() throws {
+        let installations = installations()
+        #expect(installations.rollBackTarget() == nil)
+        #expect(throws: YtDlpRollBackError.nothingToRollBackTo) { try installations.rollBack() }
+
+        try download("2026.10.26.220202")
+        try writeState(#"{"active": "2026.10.26.220202"}"#)
+        try installations.rollBack()
+
+        #expect(installations.rollBackTarget() == nil)
+    }
+
+    @Test func aRollBackToTheBundledCopySurvivesLaunch() throws {
+        try download("2026.10.26.220202")
+        try writeState(#"{"previous": "2026.10.26.220202", "pinned": true}"#)
+        let installations = installations()
+
+        #expect(try installations.prepareAtLaunch() == bundledCopy)
+        #expect(installations.readState() == YtDlpState(active: nil, previous: "2026.10.26.220202", pinned: true))
+    }
+
+    @Test func installingAfterARollBackToBundledClearsThePin() throws {
+        try download("2026.10.26.220202")
+        try writeState(#"{"previous": "2026.10.26.220202", "pinned": true}"#)
+        let installations = installations()
+
+        let staging = try stage("2026.10.26.220202", in: installations)
+        _ = try installations.install(staging, as: #require(YtDlpVersion("2026.10.26.220202")))
+
+        #expect(installations.readState() == YtDlpState(active: "2026.10.26.220202", previous: nil, pinned: false))
+        #expect(installations.rollBackTarget() == bundledCopy)
+    }
+
+    @Test func aPinIsDroppedOnceTheCopyRolledBackFromIsOlderThanANewBundledCopy() throws {
+        // An app update shipped a bundled floor newer than both downloads.
+        try download("2026.10.26.220202")
+        try download("2026.10.27.000000")
+        try writeState(#"{"active": "2026.10.26.220202", "previous": "2026.10.27.000000", "pinned": true}"#)
+        let installations = installations(bundled: "2026.10.28")
+
+        #expect(try installations.prepareAtLaunch().origin == .bundled)
+        #expect(installations.readState() == YtDlpState())
+    }
+
+    @Test func whenTheActiveDirectoryIsGoneThePreviousDownloadTakesOver() throws {
+        try download("2026.10.26.220202")
+        try writeState(#"{"active": "2026.10.27.000000", "previous": "2026.10.26.220202"}"#)
+        let installations = installations()
+
+        #expect(try installations.prepareAtLaunch().version?.tag == "2026.10.26.220202")
+        #expect(installations.readState() == YtDlpState(active: "2026.10.26.220202"))
+    }
+
+    @Test func afterRollingBackToBundledTheChainFallsBackToTheNewerDownload() throws {
+        try download("2026.10.26.220202")
+        try writeState(#"{"previous": "2026.10.26.220202", "pinned": true}"#)
+
+        let chain = installations().fallbackChain()
+
+        #expect(chain.map(\.version?.tag) == ["2026.10.20", "2026.10.26.220202"])
+    }
 }

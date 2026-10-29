@@ -18,7 +18,7 @@ struct YT4SApp: App {
     var body: some Scene {
         Window("YT4S", id: "main") {
             if let models {
-                MainWindow(model: models.window, ytDlpUpdates: models.ytDlpUpdates, appUpdate: models.appUpdate)
+                MainWindowContent(models: models)
             } else {
                 MoveToApplicationsView(location: installLocation)
             }

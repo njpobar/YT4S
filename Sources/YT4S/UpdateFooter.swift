@@ -2,8 +2,8 @@ import SwiftUI
 import YT4SCore
 
 /// The quiet footer row at the bottom of the main window (prototype `.upd`): yt-dlp version and
-/// Update yt-dlp, then YT4S version and Update app, each with a dot badge when an update is
-/// available; below it the footer status / error text. Roll back (#30) joins the yt-dlp controls.
+/// Update yt-dlp and Roll back, then YT4S version and Update app, each update button with a dot
+/// badge when an update is available; below it the footer status / error text.
 struct UpdateFooter: View {
     let ytDlp: YtDlpUpdateModel
     let app: AppUpdateModel
@@ -58,6 +58,18 @@ private struct YtDlpUpdateControls: View {
             Task { await model.update() }
         }
         .disabled(!model.canUpdate)
+        Button("Roll back") { model.rollBack() }
+            .controlSize(.small)
+            .disabled(!model.canRollBack)
+            .help(rollBackHelp)
+    }
+
+    private var rollBackHelp: String {
+        guard let target = model.rollBackTarget else {
+            return "Nothing to roll back to. Roll back becomes available after Update yt-dlp installs a new version."
+        }
+        let version = target.version.map { "yt-dlp \($0.tag)" } ?? "the yt-dlp that came with YT4S"
+        return "Go back to \(version) if the new one works worse. Works offline."
     }
 
     private var helpText: String {

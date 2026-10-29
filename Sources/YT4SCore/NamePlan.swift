@@ -3,9 +3,9 @@ import Foundation
 /// What is at a path in the Download folder, for the collision rule.
 public enum FileOccupant: Equatable, Sendable {
     case free
-    /// A file YT4S saved for the same video (Download again replaces it).
+    /// A file YT4S saved for the same video in the same Format: that video is already there.
     case sameVideo
-    /// Any other file: another video, or a file YT4S did not save.
+    /// Any other file: another video, the other Format, or a file YT4S did not save.
     case otherVideo
 }
 
@@ -65,26 +65,39 @@ public struct NamePlan: Equatable, Sendable {
     /// The path inside the Download folder, e.g. `Playlist/01 - Title.mp4`, with every folder and
     /// the file name cleaned and trimmed under the filesystem limit (the stem gives way; prefix,
     /// suffix and extension are kept). A stem left empty becomes the video ID.
-    /// `withIDSuffix` appends ` [<video id>]`: the collision rule's name for a newcomer.
-    public func relativePath(videoID: String, fileExtension: String, withIDSuffix: Bool) -> String {
+    /// `withIDSuffix` appends ` [<video id>]`: the collision rule's name for a newcomer. A `copy`
+    /// above 1 follows it (` [<video id>] 2`) when even that name is taken.
+    public func relativePath(videoID: String, fileExtension: String, withIDSuffix: Bool, copy: Int = 1) -> String {
         let folderPath = folders
             .compactMap { Self.nonEmpty(FileNameCleanup.trim(FileNameCleanup.clean($0), toBytes: FileNameCleanup.maxNameBytes)) }
             .map { "\($0)/" }
             .joined()
         let prefix = indexPrefix.map { "\($0) - " } ?? ""
-        let suffix = (withIDSuffix ? " [\(videoID)]" : "") + ".\(fileExtension)"
+        let suffix = (withIDSuffix ? " [\(videoID)]" : "") + (copy > 1 ? " \(copy)" : "") + ".\(fileExtension)"
         let budget = FileNameCleanup.maxNameBytes - FileNameCleanup.byteCount(prefix + suffix)
         let stem = FileNameCleanup.trim(Self.nonEmpty(FileNameCleanup.clean(stem)) ?? videoID, toBytes: budget)
         return folderPath + prefix + stem + suffix
     }
 
-    /// The collision rule: the plain name, unless a different video already has it; then the
-    /// newcomer gets ` [<video id>]`. `occupant` says what is at a relative path now.
-    public func resolvedPath(videoID: String, fileExtension: String, occupant: (String) -> FileOccupant) -> String {
-        let plain = relativePath(videoID: videoID, fileExtension: fileExtension, withIDSuffix: false)
-        guard occupant(plain) == .otherVideo else { return plain }
-        // The suffixed name carries this video's ID, so whatever is there is taken to be this video.
-        return relativePath(videoID: videoID, fileExtension: fileExtension, withIDSuffix: true)
+    /// The collision rule: the plain name, unless another file already has it; then the newcomer
+    /// gets ` [<video id>]`, then ` [<video id>] 2`, ` 3`... until a name is free. Never names a taken
+    /// file, except one holding this same video in this Format (`.sameVideo`), which means the video
+    /// is already there; with `downloadAgain` that file is a clash too, so the result is a new file.
+    /// `occupant` says what is at a relative path now.
+    public func resolvedPath(
+        videoID: String, fileExtension: String, downloadAgain: Bool = false, occupant: (String) -> FileOccupant
+    ) -> String {
+        var candidate = relativePath(videoID: videoID, fileExtension: fileExtension, withIDSuffix: false)
+        var copy = 0
+        while true {
+            switch occupant(candidate) {
+            case .free: return candidate
+            case .sameVideo where !downloadAgain: return candidate
+            case .sameVideo, .otherVideo: break
+            }
+            copy += 1
+            candidate = relativePath(videoID: videoID, fileExtension: fileExtension, withIDSuffix: true, copy: copy)
+        }
     }
 
     private static func folderName(_ name: String?, fallback: String) -> String {

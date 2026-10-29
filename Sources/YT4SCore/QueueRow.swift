@@ -11,6 +11,7 @@ public struct QueueRow: Equatable, Sendable {
         case cancel
         case retry
         case remove
+        case downloadAgain
         case showInFinder(URL)
     }
 
@@ -21,6 +22,8 @@ public struct QueueRow: Equatable, Sendable {
     public var fraction: Double?
     public var showsProgress: Bool
     public var actions: [Action]
+    /// Raw yt-dlp output behind the Details disclosure (with Copy); only failed rows have it.
+    public var details: String?
 
     public init(_ item: QueueItem) {
         title = item.title ?? item.request.url
@@ -28,6 +31,7 @@ public struct QueueRow: Equatable, Sendable {
         showsProgress = false
         tone = .normal
         actions = []
+        details = nil
         switch item.state {
         case .pending:
             status = "Waiting"
@@ -41,15 +45,15 @@ public struct QueueRow: Equatable, Sendable {
             status = "Done"
             tone = .success
             actions = [.showInFinder(file)]
-        case .failed:
-            // Placeholder until the failure categories ticket gives one sentence per category.
-            status = "Couldn't download this video."
+        case .failed(let failure):
+            status = failure.category.sentence
             tone = .failure
-            actions = [.retry]
+            details = failure.details
+            actions = failure.category.isRetryable ? [.retry] : []
         case .alreadyDownloaded(let file):
             status = "Already downloaded"
             tone = .skipped
-            actions = [.showInFinder(file)]
+            actions = [.downloadAgain, .showInFinder(file)]
         case .cancelled:
             status = "Cancelled"
             actions = [.retry, .remove]

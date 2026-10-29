@@ -41,15 +41,17 @@ struct RealYtDlpNamingTests {
             .sorted()
     }
 
-    @Test func aSingleVideoDatedAndTheSameTitleAgainFromAChannelFolder() async throws {
+    @Test func aSingleVideoDatedThenTheSameVideoFromItsChannelIsAlreadyDownloaded() async throws {
         let (folder, items) = try await download(
             "https://www.youtube.com/watch?v=jNQXAC9IVRw\nhttps://www.youtube.com/@jawed",
             DownloadOptions(format: .video, quality: .p720, naming: .dateTitle)
         )
 
-        #expect(items.allSatisfy { $0.isFinished })
-        #expect(files(in: folder) == ["2005-04-24 - Me at the zoo.mp4", "jawed/2005-04-24 - Me at the zoo.mp4"])
-        #expect(DownloadFolder(url: folder).videoID(ofFileAt: folder.appendingPathComponent("jawed/2005-04-24 - Me at the zoo.mp4")) == "jNQXAC9IVRw")
+        // The channel's only video is the one just downloaded: Already downloaded, not fetched twice.
+        let saved = folder.appendingPathComponent("2005-04-24 - Me at the zoo.mp4")
+        #expect(items.map(\.state) == [.finished(file: saved), .alreadyDownloaded(file: saved)])
+        #expect(files(in: folder) == ["2005-04-24 - Me at the zoo.mp4"])
+        #expect(DownloadFolder(url: folder).savedVideo(ofFileAt: saved) == SavedVideo(videoID: "jNQXAC9IVRw", format: .video))
     }
 
     @Test func aPlaylistAsMP3WithChannelTitle() async throws {
@@ -102,5 +104,27 @@ struct RealYtDlpNamingTests {
         #expect(names.count == 3)
         #expect(names.allSatisfy { $0.hasPrefix("Rick Astley Live at The O2/20") && $0.hasSuffix(".mp3") })
         #expect(names.map { ($0 as NSString).lastPathComponent.prefix(11) } == ["001 of 3 - ", "002 of 3 - ", "003 of 3 - "])
+    }
+
+    @Test func aRenamedVideoIsAlreadyDownloadedAndDownloadAgainSavesASecondCopy() async throws {
+        let options = DownloadOptions(format: .mp3, quality: .best, naming: .title)
+        let (folder, _) = try await download("https://www.youtube.com/watch?v=jNQXAC9IVRw", options)
+        let renamed = folder.appendingPathComponent("zoo.mp3")
+        try FileManager.default.moveItem(at: folder.appendingPathComponent("Me at the zoo.mp3"), to: renamed)
+
+        let model = MainWindowModel(queue: Queue(runner: YtDlpRunner(tools: try #require(Self.tools))), downloadFolder: folder)
+        model.options = DownloadOptions(format: .mp3, quality: .best, naming: .dateTitle)
+        model.pasteText = "https://youtu.be/jNQXAC9IVRw"
+        model.download()
+        await model.queue.waitUntilIdle()
+        #expect(model.queue.items.map(\.state) == [.alreadyDownloaded(file: renamed)])
+
+        model.queue.downloadAgain(model.queue.items[0].id)
+        await model.queue.waitUntilIdle()
+
+        let copy = folder.appendingPathComponent("2005-04-24 - Me at the zoo.mp3")
+        #expect(model.queue.items.map(\.state) == [.finished(file: copy)])
+        #expect(files(in: folder) == ["2005-04-24 - Me at the zoo.mp3", "zoo.mp3"])
+        #expect(DownloadFolder(url: folder).savedVideo(ofFileAt: copy) == SavedVideo(videoID: "jNQXAC9IVRw", format: .mp3))
     }
 }

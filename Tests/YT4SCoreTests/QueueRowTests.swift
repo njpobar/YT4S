@@ -31,7 +31,7 @@ import Testing
         #expect(QueueRow(QueueItem(request: request, state: .running(DownloadProgress()))).status == "Starting...")
         #expect(QueueRow(QueueItem(request: request, state: .finished(file: file))).status == "Done")
         #expect(QueueRow(QueueItem(request: request, state: .failed(DownloadFailure(termination: .exited(1), details: "ERROR: x")))).status
-            == "Couldn't download this video.")
+            == "Something went wrong. Retry, or check Details for what yt-dlp said.")
     }
 
     @Test func runningStatusShowsPercentSpeedAndTimeLeft() {
@@ -69,8 +69,41 @@ import Testing
         #expect(actions(.pending) == [.cancel])
         #expect(actions(.running(DownloadProgress())) == [.cancel])
         #expect(actions(.finished(file: file)) == [.showInFinder(file)])
-        #expect(actions(.alreadyDownloaded(file: file)) == [.showInFinder(file)])
+        #expect(actions(.alreadyDownloaded(file: file)) == [.downloadAgain, .showInFinder(file)])
         #expect(actions(.failed(DownloadFailure(termination: .exited(1), details: "ERROR: x"))) == [.retry])
         #expect(actions(.cancelled) == [.retry, .remove])
+    }
+
+    private func failedRow(_ stderr: String) -> QueueRow {
+        QueueRow(QueueItem(request: request, state: .failed(DownloadFailure(termination: .exited(1), details: stderr))))
+    }
+
+    @Test func aFailedRowSaysWhyAndWhatToDoNeverTheRawText() throws {
+        let stderr = try StderrFixture.text("connection-refused")
+        let row = failedRow(stderr)
+
+        #expect(row.status == "Couldn't reach YouTube. Check your internet connection, then Retry.")
+        #expect(!row.status.contains("ERROR"))
+        #expect(row.tone == .failure)
+    }
+
+    @Test func aFailedRowKeepsTheRawOutputForDetails() throws {
+        let stderr = try StderrFixture.text("disk-full")
+
+        #expect(failedRow(stderr).details == stderr)
+        #expect(QueueRow(QueueItem(request: request)).details == nil)
+        #expect(QueueRow(QueueItem(request: request, state: .cancelled)).details == nil)
+    }
+
+    @Test(arguments: [
+        ("unavailable-video", [QueueRow.Action]()),
+        ("from-source/region-blocked", []),
+        ("connection-refused", [.retry]),
+        ("disk-full", [.retry]),
+        ("from-source/bot-check", [.retry]),
+        ("from-source/postprocessing-failed", [.retry]),
+    ])
+    func onlyFailuresThatCanSucceedAgainOfferRetry(fixture: String, expected: [QueueRow.Action]) throws {
+        #expect(failedRow(try StderrFixture.text(fixture)).actions == expected)
     }
 }

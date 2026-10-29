@@ -8,7 +8,8 @@ import Testing
         DownloadRequest(url: "https://www.youtube.com/watch?v=\(id)", downloadFolder: fake.downloadFolder, options: .default)
     }
 
-    /// Polls until `condition` holds, failing after `timeout`.
+    /// Polls until `condition` holds, failing after `timeout`. Generous on purpose: polling returns
+    /// as soon as the condition holds, and a loaded machine can take seconds just to start the fake.
     private func eventually(_ timeout: Duration = .seconds(30), _ condition: () -> Bool) async throws {
         let deadline = ContinuousClock.now + timeout
         while !condition() {
@@ -221,7 +222,8 @@ import Testing
         try "network-drop".write(to: scenarioFile, atomically: true, encoding: .utf8)
         let queue = Queue(
             runner: fake.runner(scenario: "success", extraEnvironment: ["YT4S_FAKE_SCENARIO_FILE": scenarioFile.path]),
-            partialFilesFolder: partials
+            partialFilesFolder: partials,
+            networkRetryDelay: .zero
         )
         let original = DownloadRequest(
             url: "https://www.youtube.com/watch?v=abc123",
@@ -346,5 +348,128 @@ import Testing
         queue.add(request(fake, id: "again"))
         await queue.waitUntilIdle()
         #expect(reports == ["1 downloaded, 1 failed", "2 downloaded, 1 failed"])
+    }
+
+    // MARK: - Failure categories (#26)
+
+    private func failure(_ item: QueueItem) -> DownloadFailure? {
+        if case .failed(let failure) = item.state { failure } else { nil }
+    }
+
+    /// A runner whose fake appends one line per yt-dlp run to the returned log.
+    private func countingRunner(_ fake: FakeYtDlp, scenario: String, extra: [String: String] = [:]) -> (YtDlpRunner, URL) {
+        let log = fake.downloadFolder.deletingLastPathComponent().appendingPathComponent("runs.log")
+        return (fake.runner(scenario: scenario, extraEnvironment: extra.merging(["YT4S_FAKE_RUN_LOG": log.path]) { a, _ in a }), log)
+    }
+
+    private func runs(_ log: URL) -> Int {
+        ((try? String(contentsOf: log, encoding: .utf8)) ?? "").split(separator: "\n").count
+    }
+
+    @Test func aFailedVideoIsCategorizedFromYtDlpOutput() async throws {
+        let fake = try FakeYtDlp()
+        let queue = Queue(runner: fake.runner(scenario: "outdated"))
+
+        queue.add(request(fake))
+        await queue.waitUntilIdle()
+
+        #expect(failure(queue.items[0])?.category == .looksOutdated)
+    }
+
+    @Test func aNetworkDropIsRetriedOnceAutomatically() async throws {
+        let fake = try FakeYtDlp()
+        let (runner, log) = countingRunner(fake, scenario: "network-drop-once")
+        let queue = Queue(runner: runner, networkRetryDelay: .zero)
+
+        queue.add(request(fake))
+        await queue.waitUntilIdle()
+
+        #expect(queue.items[0].isFinished)
+        #expect(runs(log) == 2)
+        #expect(files(in: fake.downloadFolder) == ["Fake Video abc123.mp4"])
+    }
+
+    @Test func aNetworkDropThatPersistsFailsAfterOneAutomaticRetry() async throws {
+        let fake = try FakeYtDlp()
+        let (runner, log) = countingRunner(fake, scenario: "network-drop")
+        let queue = Queue(runner: runner, networkRetryDelay: .zero)
+
+        queue.add(request(fake))
+        await queue.waitUntilIdle()
+
+        #expect(failure(queue.items[0])?.category == .network)
+        #expect(runs(log) == 2)
+    }
+
+    @Test func otherFailuresAreNotRetriedAutomatically() async throws {
+        let fake = try FakeYtDlp()
+        let (runner, log) = countingRunner(fake, scenario: "outdated")
+        let queue = Queue(runner: runner, networkRetryDelay: .zero)
+
+        queue.add(request(fake))
+        await queue.waitUntilIdle()
+
+        #expect(failure(queue.items[0])?.category == .looksOutdated)
+        #expect(runs(log) == 1)
+    }
+
+    @Test func theAutomaticRetryWaitsAShortDelayAndCanBeCancelled() async throws {
+        let fake = try FakeYtDlp()
+        let (runner, log) = countingRunner(fake, scenario: "network-drop")
+        let queue = Queue(runner: runner, networkRetryDelay: .seconds(30))
+
+        let id = queue.add(request(fake))
+        try await eventually { runs(log) == 1 }
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(runs(log) == 1, "the second run waits for the delay")
+        #expect(queue.items[0].isActive, "the row is not failed while waiting to retry")
+
+        queue.cancel(id)
+        await queue.waitUntilIdle()
+
+        #expect(queue.items[0].state == .cancelled)
+        #expect(runs(log) == 1)
+    }
+
+    @Test func retryDoesNothingForAVideoThatCannotSucceedAgain() async throws {
+        let fake = try FakeYtDlp()
+        let (runner, log) = countingRunner(fake, scenario: "video-failure")
+        let queue = Queue(runner: runner)
+
+        let id = queue.add(request(fake))
+        await queue.waitUntilIdle()
+        #expect(failure(queue.items[0])?.category == .unavailable)
+
+        queue.retry(id)
+
+        #expect(queue.items[0].isFailed)
+        #expect(queue.isIdle)
+        #expect(runs(log) == 1)
+    }
+
+    @Test func retryAllFailedRetriesEveryRetryableFailedRow() async throws {
+        let fake = try FakeYtDlp()
+        let scenarioFile = fake.downloadFolder.deletingLastPathComponent().appendingPathComponent("scenario")
+        try "outdated".write(to: scenarioFile, atomically: true, encoding: .utf8)
+        let queue = Queue(runner: fake.runner(scenario: "success", extraEnvironment: ["YT4S_FAKE_SCENARIO_FILE": scenarioFile.path]))
+
+        queue.add(request(fake, id: "first"))
+        queue.add(request(fake, id: "second"))
+        await queue.waitUntilIdle()
+        try "video-failure".write(to: scenarioFile, atomically: true, encoding: .utf8)
+        queue.add(request(fake, id: "removed"))
+        let cancelled = queue.add(request(fake, id: "cancelled"))
+        queue.cancel(cancelled)
+        await queue.waitUntilIdle()
+        #expect(QueueSummary(queue.items).retryableFailures == 2)
+
+        try "success".write(to: scenarioFile, atomically: true, encoding: .utf8)
+        queue.retryAllFailed()
+        await queue.waitUntilIdle()
+
+        #expect(queue.items[0].isFinished)
+        #expect(queue.items[1].isFinished)
+        #expect(failure(queue.items[2])?.category == .unavailable)
+        #expect(queue.items[3].state == .cancelled)
     }
 }
