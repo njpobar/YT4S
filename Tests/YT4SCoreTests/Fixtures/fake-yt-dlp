@@ -4,6 +4,8 @@
 #
 # Environment:
 #   YT4S_FAKE_SCENARIO       success (default) | video-failure | network-drop | slow | outdated | crash
+#   YT4S_FAKE_SCENARIO_FILE  if set and the file exists, its contents override YT4S_FAKE_SCENARIO
+#                            (lets a test change the outcome between two runs, e.g. for Retry)
 #   YT4S_FAKE_FAIL_IDS       video-failure: comma-separated video IDs that fail (default: every video)
 #   YT4S_FAKE_ERROR_MESSAGE  overrides the ERROR line text for failing scenarios ("<id>" is replaced)
 #   YT4S_FAKE_STEP_DELAY     seconds between progress steps (default 0, slow: 1)
@@ -18,6 +20,8 @@
 #     it implies --simulate unless --no-simulate or a stage after "video" is used.
 #   - --progress-template [TYPE:]TEMPLATE (TYPE download by default) prints one stdout line per
 #     progress step, fields under progress.* and info.*. Hidden by --quiet unless --progress.
+#   - While downloading, the partial file is <path>.part under -P temp: (or home: if no temp:),
+#     like real yt-dlp; on success it is removed and the final file is written under home:.
 #   - Errors go to stderr as "ERROR: ..." and the process exits 1 if any video failed.
 # Fake-only guard: real downloads require --ignore-config, --no-update, --ffmpeg-location and
 # --js-runtimes (ADR 0002); missing any of them exits 2 so a regression in the app is caught.
@@ -26,6 +30,9 @@ emulate -L zsh
 setopt extended_glob no_unset pipe_fail
 
 scenario=${YT4S_FAKE_SCENARIO:-success}
+if [[ -n ${YT4S_FAKE_SCENARIO_FILE:-} && -f $YT4S_FAKE_SCENARIO_FILE ]]; then
+  scenario=$(<$YT4S_FAKE_SCENARIO_FILE)
+fi
 step_delay=${YT4S_FAKE_STEP_DELAY:-0}
 [[ $scenario == slow && -z ${YT4S_FAKE_STEP_DELAY:-} ]] && step_delay=1
 
@@ -287,25 +294,30 @@ process_video() {  # process_video ID [PLAYLIST_TITLE INDEX COUNT CHANNEL]
   say "[info] $id: Downloading 1 format(s): 137+140"
   say "[download] Destination: $filepath"
   mkdir -p -- "${filepath:h}"
+  local partpath=$filepath.part
+  if [[ -n $temp_path && $relative != /* ]]; then partpath=$temp_path/$relative.part; fi
+  mkdir -p -- "${partpath:h}"
 
   local pct
   for pct in 0 25 50 75 100; do
     if [[ $scenario == network-drop && $pct -gt 50 ]]; then
-      print -n -- "partial $id" > "$filepath.part"
+      print -n -- "partial $id" > "$partpath"
       error_line $id "[download] Got error: HTTPSConnectionPool(host='rr1---sn-fake.googlevideo.com', port=443): Read timed out. (read timeout=20.0)"
       any_failed=1; return
     fi
     if [[ $scenario == crash && $pct -gt 25 ]]; then
-      print -n -- "partial $id" > "$filepath.part"
+      print -n -- "partial $id" > "$partpath"
       print -u2 'Traceback (most recent call last):'
       print -u2 '  File "yt_dlp/__main__.py", line 17, in <module>'
       print -u2 'Fatal Python error: Segmentation fault'
       kill -SEGV $$
     fi
+    print -n -- "partial $id $pct" > "$partpath"
     if (( pct == 100 )); then progress $pct finished; else progress $pct downloading; fi
     (( pct < 100 )) && [[ $step_delay != 0 ]] && sleep $step_delay
   done
 
+  rm -f -- "$partpath"
   print -r -- "fake media $id ${info[ext]}" > "$filepath"
   emit_prints post_process
   emit_prints after_move
