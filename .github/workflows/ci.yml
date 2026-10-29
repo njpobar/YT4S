@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    # Apple Silicon runner; YT4S is arm64-only.
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          uname -m
+          xcode-select -p
+          swift --version
+
+      - uses: actions/cache@v4
+        with:
+          path: .build
+          key: spm-${{ runner.os }}-${{ hashFiles('Package.resolved') }}
+          restore-keys: spm-${{ runner.os }}-
+
+      # Only package resolution touches the network. The tests themselves run against the
+      # fake yt-dlp fixture and never download anything.
+      - name: Resolve packages
+        run: swift package resolve
+
+      - name: swift test
+        run: swift test
