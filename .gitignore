@@ -6,8 +6,9 @@ Package.resolved.orig
 # Pinned third-party binaries fetched by scripts/fetch-deps.sh (see deps.lock)
 vendor/
 
-# scripts/build-app.sh output
+# scripts/build-app.sh and scripts/release.sh output
 build/
+dist/
 
 # macOS
 .DS_Store
