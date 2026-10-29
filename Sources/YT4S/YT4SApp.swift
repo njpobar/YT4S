@@ -18,6 +18,10 @@ struct YT4SApp: App {
         queue: Queue(runner: YtDlpRunner(tools: BundledTools(resourcesDirectory: Bundle.main.resourceURL!)))
     )
 
+    init() {
+        model.queue.onBatchFinished = { BatchNotifier.batchFinished($0) }
+    }
+
     var body: some Scene {
         Window("YT4S", id: "main") {
             MainWindow(model: model)

@@ -3,7 +3,7 @@ import Foundation
 /// What one Queue row displays, derived from its `QueueItem`. Kept out of the view so it is tested.
 public struct QueueRow: Equatable, Sendable {
     public enum Tone: Sendable {
-        case normal, success, failure
+        case normal, success, failure, skipped
     }
 
     /// A button on the row, in display order.
@@ -48,6 +48,7 @@ public struct QueueRow: Equatable, Sendable {
             actions = [.retry]
         case .alreadyDownloaded(let file):
             status = "Already downloaded"
+            tone = .skipped
             actions = [.showInFinder(file)]
         case .cancelled:
             status = "Cancelled"

@@ -57,6 +57,7 @@ import Testing
         let file = URL(fileURLWithPath: "/tmp/YT4S/Me at the zoo.mp4")
         #expect(QueueRow(QueueItem(request: request, state: .cancelled)).status == "Cancelled")
         #expect(QueueRow(QueueItem(request: request, state: .alreadyDownloaded(file: file))).status == "Already downloaded")
+        #expect(QueueRow(QueueItem(request: request, state: .alreadyDownloaded(file: file))).tone == .skipped)
     }
 
     @Test func eachStateOffersItsActions() {
