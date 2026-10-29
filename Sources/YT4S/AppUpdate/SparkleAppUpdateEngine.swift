@@ -65,7 +65,7 @@ import YT4SCore
 
 // MARK: - Background probe results
 
-extension SparkleAppUpdateEngine: @preconcurrency SPUUpdaterDelegate {
+extension SparkleAppUpdateEngine: SPUUpdaterDelegate {
     func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
         guard !installing else { return }
         onEvent?(.found(version: item.displayVersionString))
@@ -88,7 +88,7 @@ extension SparkleAppUpdateEngine: @preconcurrency SPUUpdaterDelegate {
 
 // MARK: - A silent user driver: every answer is "install now"
 
-extension SparkleAppUpdateEngine: @preconcurrency SPUUserDriver {
+extension SparkleAppUpdateEngine: SPUUserDriver {
     func show(_ request: SPUUpdatePermissionRequest, reply: @escaping (SUUpdatePermissionResponse) -> Void) {
         // The app schedules its own checks (launch and daily); Sparkle's scheduler stays off.
         reply(SUUpdatePermissionResponse(automaticUpdateChecks: false, sendSystemProfile: false))

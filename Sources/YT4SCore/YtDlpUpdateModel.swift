@@ -56,10 +56,12 @@ public final class YtDlpUpdateModel {
 
     public var canUpdate: Bool { !isUpdating && !downloadsRunning() }
 
+    /// Why the button is disabled, for the footer status text (shared with Update app).
+    public var hint: String? { downloadsRunning() && !isUpdating ? UpdateButtonHint.downloadsRunning : nil }
+
     /// The footer status / error text, or `nil` for none.
     public var message: Message? {
         if isUpdating { return Message(text: "Updating yt-dlp...", isError: false) }
-        if downloadsRunning() { return Message(text: "Finish or cancel the Queue to update yt-dlp.", isError: false) }
         return result
     }
 
@@ -127,7 +129,7 @@ public final class YtDlpUpdateModel {
 }
 
 extension Queue {
-    /// Whether any item is pending or running: Update yt-dlp is disabled meanwhile.
+    /// Whether any item is pending or running: both update buttons are disabled meanwhile.
     /// Derived from `items`, so it is observable.
     public var hasActiveDownloads: Bool {
         items.contains {

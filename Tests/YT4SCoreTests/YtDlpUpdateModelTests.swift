@@ -126,7 +126,8 @@ import Testing
         let model = model(feed, downloads: downloads)
 
         #expect(!model.canUpdate)
-        #expect(model.message == YtDlpUpdateModel.Message(text: "Finish or cancel the Queue to update yt-dlp.", isError: false))
+        #expect(model.hint == UpdateButtonHint.downloadsRunning)
+        #expect(model.message == nil)
 
         await model.update()
         #expect(feed.requested.isEmpty)
@@ -134,7 +135,7 @@ import Testing
 
         downloads.running = false
         #expect(model.canUpdate)
-        #expect(model.message == nil)
+        #expect(model.hint == nil)
     }
 
     @Test func theQueueCountsAsDownloadingUntilEveryItemHasEnded() async throws {

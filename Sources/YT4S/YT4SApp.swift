@@ -7,31 +7,17 @@ struct YT4SApp: App {
 
     // Created once with the App. Not @State: on the macOS 27 SDK @State is a SwiftUI macro whose
     // plugin ships only with Xcode, and this project builds with Command Line Tools.
-    private let model: MainWindowModel
-    private let ytDlpUpdates: YtDlpUpdateModel
     // Nil when YT4S must first be moved to /Applications: Sparkle cannot update it from anywhere else.
-    private let appUpdate: AppUpdateModel?
+    private let models: WindowModels?
 
     init() {
-        (model, ytDlpUpdates) = Self.makeModels()
-        if installLocation.mustMove {
-            appUpdate = nil
-        } else {
-            let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
-            let appUpdate = AppUpdateModel(engine: SparkleAppUpdateEngine(), currentVersion: version)
-            appUpdate.start()
-            self.appUpdate = appUpdate
-        }
+        models = installLocation.mustMove ? nil : Self.makeModels()
     }
 
     var body: some Scene {
         Window("YT4S", id: "main") {
-            if let appUpdate {
-                MainWindow(model: model, ytDlpUpdates: ytDlpUpdates)
-                    // Placeholder until the footer row (Update yt-dlp, Roll back, Update app) lands.
-                    .safeAreaInset(edge: .bottom, alignment: .leading) {
-                        UpdateAppButton(model: appUpdate).padding(12)
-                    }
+            if let models {
+                MainWindow(model: models.window, ytDlpUpdates: models.ytDlpUpdates, appUpdate: models.appUpdate)
             } else {
                 MoveToApplicationsView(location: installLocation)
             }

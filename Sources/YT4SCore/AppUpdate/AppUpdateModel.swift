@@ -42,26 +42,29 @@ public enum UpdateButtonHint {
     /// Footer text after a click that did not relaunch: up to date, or what failed.
     public private(set) var message: String?
 
-    /// Set by the app from the Queue: true while any download runs.
-    public var downloadsRunning = false
-
-    public var isEnabled: Bool { !downloadsRunning && !isUpdating }
+    public var isEnabled: Bool { !downloadsRunning() && !isUpdating }
     public var title: String { isUpdating ? "Updating…" : "Update app" }
-    /// Why the button is disabled, shown next to it.
-    public var hint: String? { downloadsRunning && !isUpdating ? UpdateButtonHint.downloadsRunning : nil }
+    public var versionLabel: String { "YT4S \(currentVersion)" }
+    /// Why the button is disabled, for the footer status text.
+    public var hint: String? { downloadsRunning() && !isUpdating ? UpdateButtonHint.downloadsRunning : nil }
 
-    private let engine: AppUpdateEngine
-    private let currentVersion: String
-    private let sleep: Sleep
-    private var schedule: Task<Void, Never>?
+    @ObservationIgnored private let engine: AppUpdateEngine
+    @ObservationIgnored private let currentVersion: String
+    @ObservationIgnored private let sleep: Sleep
+    @ObservationIgnored private let downloadsRunning: @MainActor () -> Bool
+    @ObservationIgnored private var schedule: Task<Void, Never>?
 
+    /// - Parameter downloadsRunning: whether any Queue item is pending or running (the same signal
+    ///   Update yt-dlp uses); read on every access, so pass a closure over observable state.
     public init(
         engine: AppUpdateEngine,
         currentVersion: String,
+        downloadsRunning: @escaping @MainActor () -> Bool,
         sleep: @escaping Sleep = { try await Task.sleep(for: $0) }
     ) {
         self.engine = engine
         self.currentVersion = currentVersion
+        self.downloadsRunning = downloadsRunning
         self.sleep = sleep
         engine.onEvent = { [weak self] event in self?.handle(event) }
     }

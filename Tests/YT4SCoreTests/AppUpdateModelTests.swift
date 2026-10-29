@@ -5,7 +5,7 @@ import Testing
 @MainActor @Suite struct AppUpdateModelTests {
     @Test func checksOnStartAndShowsADotWhenAnUpdateIsFound() {
         let engine = FakeAppUpdateEngine()
-        let model = AppUpdateModel(engine: engine, currentVersion: "1.0.0")
+        let model = AppUpdateModel(engine: engine, currentVersion: "1.0.0", downloadsRunning: { false })
         #expect(model.showsDot == false)
 
         model.start()
@@ -20,7 +20,7 @@ import Testing
     @Test func checksAgainOnceADayWhileLeftOpen() async {
         let engine = FakeAppUpdateEngine()
         let days = ManualTimer()
-        let model = AppUpdateModel(engine: engine, currentVersion: "1.0.0", sleep: days.sleep)
+        let model = AppUpdateModel(engine: engine, currentVersion: "1.0.0", downloadsRunning: { false }, sleep: days.sleep)
 
         model.start()
         await days.waitForSleeper()
@@ -39,7 +39,7 @@ import Testing
 
     @Test func clickingInstallsAndDisablesTheButtonUntilSparkleRelaunches() {
         let engine = FakeAppUpdateEngine()
-        let model = AppUpdateModel(engine: engine, currentVersion: "1.0.0")
+        let model = AppUpdateModel(engine: engine, currentVersion: "1.0.0", downloadsRunning: { false })
         model.start()
         engine.report(.found(version: "1.1.0"))
         #expect(model.isEnabled)
@@ -56,10 +56,11 @@ import Testing
 
     @Test func isDisabledWithAHintWhileAnyDownloadRuns() {
         let engine = FakeAppUpdateEngine()
-        let model = AppUpdateModel(engine: engine, currentVersion: "1.0.0")
+        let downloads = Downloads()
+        let model = AppUpdateModel(engine: engine, currentVersion: "1.0.0", downloadsRunning: { downloads.running })
         engine.report(.found(version: "1.1.0"))
 
-        model.downloadsRunning = true
+        downloads.running = true
 
         #expect(model.isEnabled == false)
         #expect(model.hint == "Finish or cancel the Queue first.")
@@ -68,9 +69,18 @@ import Testing
         model.updateApp()
         #expect(engine.installs == 0)
 
-        model.downloadsRunning = false
+        downloads.running = false
         #expect(model.isEnabled)
         #expect(model.hint == nil)
+    }
+
+    @Test func labelsTheRunningVersion() {
+        let model = AppUpdateModel(engine: FakeAppUpdateEngine(), currentVersion: "1.0.0", downloadsRunning: { false })
+        #expect(model.versionLabel == "YT4S 1.0.0")
+    }
+
+    private final class Downloads {
+        var running = false
     }
 }
 
@@ -91,7 +101,7 @@ import Testing
     ])
     func aFailedUpdateKeepsTheCurrentVersionAndExplainsInTheFooter(failure: AppUpdateFailure, message: String) {
         let engine = FakeAppUpdateEngine()
-        let model = AppUpdateModel(engine: engine, currentVersion: "1.0.0")
+        let model = AppUpdateModel(engine: engine, currentVersion: "1.0.0", downloadsRunning: { false })
         engine.report(.found(version: "1.1.0"))
         model.updateApp()
 
@@ -106,7 +116,7 @@ import Testing
 
     @Test func aFailedBackgroundCheckStaysQuiet() {
         let engine = FakeAppUpdateEngine()
-        let model = AppUpdateModel(engine: engine, currentVersion: "1.0.0")
+        let model = AppUpdateModel(engine: engine, currentVersion: "1.0.0", downloadsRunning: { false })
         model.start()
 
         engine.report(.failed(.offline))
@@ -117,7 +127,7 @@ import Testing
 
     @Test func clickingWithNothingNewSaysSoAndClearsTheDot() {
         let engine = FakeAppUpdateEngine()
-        let model = AppUpdateModel(engine: engine, currentVersion: "1.0.0")
+        let model = AppUpdateModel(engine: engine, currentVersion: "1.0.0", downloadsRunning: { false })
 
         model.updateApp()
         engine.report(.upToDate)
@@ -129,7 +139,7 @@ import Testing
 
     @Test func theNextClickClearsTheOldMessage() {
         let engine = FakeAppUpdateEngine()
-        let model = AppUpdateModel(engine: engine, currentVersion: "1.0.0")
+        let model = AppUpdateModel(engine: engine, currentVersion: "1.0.0", downloadsRunning: { false })
         model.updateApp()
         engine.report(.failed(.offline))
 
@@ -141,7 +151,7 @@ import Testing
 
     @Test func aBackgroundCheckThatFindsNothingClearsTheDot() {
         let engine = FakeAppUpdateEngine()
-        let model = AppUpdateModel(engine: engine, currentVersion: "1.0.0")
+        let model = AppUpdateModel(engine: engine, currentVersion: "1.0.0", downloadsRunning: { false })
         engine.report(.found(version: "1.1.0"))
 
         engine.report(.upToDate)

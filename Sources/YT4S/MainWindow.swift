@@ -7,6 +7,7 @@ import YT4SCore
 struct MainWindow: View {
     @Bindable var model: MainWindowModel
     let ytDlpUpdates: YtDlpUpdateModel
+    let appUpdate: AppUpdateModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -54,7 +55,7 @@ struct MainWindow: View {
 
             Divider()
                 .padding(.vertical, 10)
-            UpdateFooter(ytDlp: ytDlpUpdates)
+            UpdateFooter(ytDlp: ytDlpUpdates, app: appUpdate)
         }
         .padding(18)
         .frame(minWidth: 560, minHeight: 640)
