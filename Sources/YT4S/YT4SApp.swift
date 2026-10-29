@@ -13,6 +13,11 @@ struct YT4SApp: App {
     init() {
         models = installLocation.mustMove ? nil : Self.makeModels()
         models?.window.queue.onBatchFinished = { BatchNotifier.batchFinished($0) }
+        // Quitting mid-download: stop yt-dlp, its ffmpeg and any listing instead of leaving them
+        // running without the app. The next launch removes their unfinished files.
+        NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: nil) { _ in
+            ChildProcesses.all.terminateAll()
+        }
     }
 
     var body: some Scene {

@@ -171,6 +171,8 @@ extension YT4SApp {
             queue: queue, settings: Settings(defaults: .standard), ytDlpReady: { ytDlpUpdates.isReady }
         )
         windowBox.model = window
+        // An earlier session quit mid-download (its yt-dlp was stopped, see YT4SApp.init).
+        queue.removeLeftovers(in: window.downloadFolder)
         queue.dismissesOutdatedBanner(whenSwitching: ytDlpUpdates)
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
         let appUpdate = AppUpdateModel(

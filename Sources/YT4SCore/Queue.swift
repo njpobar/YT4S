@@ -130,6 +130,15 @@ public final class Queue {
         FileManager.default.temporaryDirectory.appendingPathComponent("YT4S-partial", isDirectory: true)
     }
 
+    /// At launch, before anything downloads: removes what a quit mid-download left behind, i.e.
+    /// yt-dlp's unfinished output in `downloadFolder` (only its hidden incomplete folder) and
+    /// every partial file. Does nothing while the Queue runs.
+    public func removeLeftovers(in downloadFolder: URL) {
+        guard isIdle else { return }
+        try? FileManager.default.removeItem(at: DownloadFolder(url: downloadFolder).incompleteFolder)
+        deletePartialFiles(partialFilesFolder)
+    }
+
     /// Appends a pending item and starts it when its turn comes.
     @discardableResult
     public func add(_ request: DownloadRequest) -> QueueItem.ID {

@@ -16,6 +16,26 @@ import Testing
         if case .running(let progress) = item.state { progress.fraction } else { nil }
     }
 
+    /// A quit mid-download leaves yt-dlp's unfinished output behind; the next launch removes it
+    /// before anything downloads. Finished files next to it are never touched.
+    @Test func leftoversOfAnEarlierSessionAreRemoved() throws {
+        let fake = try FakeYtDlp()
+        let partials = fake.downloadFolder.deletingLastPathComponent().appendingPathComponent("partial")
+        let queue = Queue(runner: fake.runner(scenario: "success"), partialFilesFolder: partials)
+        let incomplete = DownloadFolder(url: fake.downloadFolder).incompleteFolder
+        let saved = fake.downloadFolder.appendingPathComponent("Me at the zoo.mp4")
+        try FileManager.default.createDirectory(at: incomplete, withIntermediateDirectories: true)
+        try Data("half".utf8).write(to: incomplete.appendingPathComponent("jNQXAC9IVRw.mp4"))
+        try FileManager.default.createDirectory(at: partials.appendingPathComponent(UUID().uuidString), withIntermediateDirectories: true)
+        try Data("done".utf8).write(to: saved)
+
+        queue.removeLeftovers(in: fake.downloadFolder)
+
+        #expect(!FileManager.default.fileExists(atPath: incomplete.path))
+        #expect(!FileManager.default.fileExists(atPath: partials.path))
+        #expect(FileManager.default.fileExists(atPath: saved.path))
+    }
+
     @Test func anAddedVideoIsPendingUntilItStarts() throws {
         let fake = try FakeYtDlp()
         let queue = Queue(runner: fake.runner(scenario: "success"))

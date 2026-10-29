@@ -27,12 +27,15 @@ public struct SubprocessResult: Sendable {
 ///
 /// Cancelling the calling task sends SIGTERM to the child and everything it started.
 public enum Subprocess {
+    /// - Parameter children: where the running child is registered, so quitting YT4S can stop it
+    ///   (`ChildProcesses.terminateAll`).
     /// - Parameter onStdoutLine: called on a background thread with each complete stdout line
     ///   (without the newline) as soon as it is written, in order, all before `run` returns.
     public static func run(
         executable: URL,
         arguments: [String],
         environment: [String: String]? = nil,
+        children: ChildProcesses = .all,
         onStdoutLine: (@Sendable (String) -> Void)? = nil
     ) async throws -> SubprocessResult {
         let process = Process()
@@ -58,6 +61,7 @@ public enum Subprocess {
                     case .exit: .exited(process.terminationStatus)
                     @unknown default: .exited(process.terminationStatus)
                     }
+                    children.remove(cancellation)
                     cancellation.sweep()
                     continuation.resume(returning: SubprocessResult(
                         termination: termination,
@@ -67,6 +71,7 @@ public enum Subprocess {
                 }
                 do {
                     try process.run()
+                    children.insert(cancellation, process: process)
                     // `onCancel` only terminates a running child: a cancel that landed before
                     // launch would otherwise let it run to completion. The flag is set before
                     // `onCancel` runs, so one of the two always sees it.
@@ -82,6 +87,49 @@ public enum Subprocess {
     }
 }
 
+/// Every child `Subprocess.run` has started and that has not ended yet, so quitting YT4S
+/// mid-download can stop them all (yt-dlp with its ffmpeg, listings, previews, version checks)
+/// instead of leaving them running without the app.
+public final class ChildProcesses: @unchecked Sendable {
+    /// The app's children: the default for every `Subprocess.run`.
+    public static let all = ChildProcesses()
+
+    private let lock = NSLock()
+    private var running: [ObjectIdentifier: (termination: GroupTermination, process: Process)] = [:]
+
+    public init() {}
+
+    fileprivate func insert(_ termination: GroupTermination, process: Process) {
+        lock.withLock {
+            // A child that already ended (its handler ran first) is not registered again.
+            guard !termination.hasEnded else { return }
+            running[ObjectIdentifier(termination)] = (termination, process)
+        }
+    }
+
+    fileprivate func remove(_ termination: GroupTermination) {
+        lock.withLock {
+            termination.markEnded()
+            running[ObjectIdentifier(termination)] = nil
+        }
+    }
+
+    /// Sends SIGTERM to every running child's process group, waits up to `gracePeriod` for them
+    /// to end, then SIGKILLs what is left. Blocks the calling thread: meant for app termination.
+    public func terminateAll(gracePeriod: Duration = .seconds(3)) {
+        for (termination, process) in lock.withLock({ Array(running.values) }) {
+            termination.terminate(process)
+        }
+        let deadline = ContinuousClock.now + gracePeriod
+        while lock.withLock({ !running.isEmpty }), ContinuousClock.now < deadline {
+            Thread.sleep(forTimeInterval: 0.02)
+        }
+        for (termination, process) in lock.withLock({ Array(running.values) }) {
+            termination.terminate(process, signal: SIGKILL)
+        }
+    }
+}
+
 /// Cancel's SIGTERM, sent to the child's whole process group rather than just the child:
 /// yt-dlp's helpers (ffmpeg) would otherwise keep running and hold the output pipes open, so
 /// `run` (and Cancel) would wait for them to finish. `Process` makes each child the leader of
@@ -93,15 +141,23 @@ public enum Subprocess {
 private final class GroupTermination: @unchecked Sendable {
     private let lock = NSLock()
     private var groupLeader: pid_t?
+    private var ended = false
 
-    func terminate(_ process: Process) {
+    var hasEnded: Bool { lock.withLock { ended } }
+
+    func markEnded() {
+        lock.withLock { ended = true }
+    }
+
+    func terminate(_ process: Process, signal: Int32 = SIGTERM) {
+        guard !hasEnded else { return }
         let pid = process.processIdentifier
         guard pid > 0, getpgid(pid) == pid else {
-            process.terminate()
+            if signal == SIGKILL { kill(pid, SIGKILL) } else { process.terminate() }
             return
         }
         lock.withLock { groupLeader = pid }
-        kill(-pid, SIGTERM)
+        kill(-pid, signal)
     }
 
     /// Called once the child has exited: signals whatever is left of its group after a Cancel.
