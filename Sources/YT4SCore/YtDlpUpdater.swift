@@ -82,9 +82,17 @@ public struct YtDlpUpdater: Sendable {
         return release.version
     }
 
+    /// Clicking it also ends Roll back's pin, even when nothing newer is installed.
     public func update() async throws -> YtDlpUpdateOutcome {
         let release = try await latestRelease()
-        guard isNewer(release.version) else { return .upToDate(installations.current()) }
+        guard isNewer(release.version) else {
+            var state = installations.readState()
+            if state.pinned {
+                state.pinned = false
+                try? installations.writeState(state)
+            }
+            return .upToDate(installations.current())
+        }
         guard let zipURL = release.assets[Self.zipAsset], let sumsURL = release.assets[Self.checksumsAsset] else {
             throw YtDlpUpdateError.releaseUnusable
         }
@@ -116,6 +124,16 @@ public struct YtDlpUpdater: Sendable {
         } catch {
             throw YtDlpUpdateError.installFailed
         }
+    }
+
+    /// At launch: the first copy of `installations.fallbackChain()` (active, previous, bundled)
+    /// whose `--version` runs, or `nil` when none does and the app is damaged. Changes nothing on
+    /// disk, so a copy that failed once is tried again at the next launch.
+    public func firstLaunchableCopy() async -> YtDlpCopy? {
+        for copy in installations.fallbackChain() where await version(of: copy.executable) != nil {
+            return copy
+        }
+        return nil
     }
 
     // MARK: Steps
@@ -161,6 +179,14 @@ public struct YtDlpUpdater: Sendable {
     }
 
     private func smokeTest(_ executable: URL, expecting version: YtDlpVersion) async throws {
+        guard let output = await self.version(of: executable), YtDlpVersion(output) == version else {
+            throw YtDlpUpdateError.smokeTestFailed
+        }
+    }
+
+    /// What `executable --version` prints, or `nil` if it does not start, exit 0 and print
+    /// something within `smokeTestTimeout`.
+    private func version(of executable: URL) async -> String? {
         let timeout = smokeTestTimeout
         let output: String? = await withTaskGroup(of: String?.self) { group in
             group.addTask {
@@ -177,7 +203,7 @@ public struct YtDlpUpdater: Sendable {
             group.cancelAll()
             return first
         }
-        guard let output, YtDlpVersion(output) == version else { throw YtDlpUpdateError.smokeTestFailed }
+        return output?.isEmpty == false ? output : nil
     }
 
     @discardableResult

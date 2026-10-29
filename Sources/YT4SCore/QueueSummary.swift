@@ -8,6 +8,8 @@ public struct QueueSummary: Equatable, Sendable {
     public var alreadyDownloaded = 0
     public var failed = 0
     public var cancelled = 0
+    /// Failed rows that Retry can help; "Retry all failed" shows when there are 2 or more.
+    public var retryableFailures = 0
     /// Whether "Clear finished" has anything to remove.
     public var hasFinished: Bool
 
@@ -18,7 +20,9 @@ public struct QueueSummary: Equatable, Sendable {
             case .pending, .running: active += 1
             case .finished: downloaded += 1
             case .alreadyDownloaded: alreadyDownloaded += 1
-            case .failed: failed += 1
+            case .failed(let failure):
+                failed += 1
+                if failure.category.isRetryable { retryableFailures += 1 }
             case .cancelled: cancelled += 1
             }
         }

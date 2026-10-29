@@ -7,10 +7,15 @@ import Testing
     let installations: YtDlpInstallations
     let bundled: YtDlpCopy
 
-    init() {
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("yt4s-update-model-\(UUID().uuidString)/yt-dlp", isDirectory: true)
-        let executable = URL(fileURLWithPath: "/Applications/YT4S.app/Contents/Resources/bin/yt-dlp/yt-dlp_macos")
+    init() throws {
+        let sandbox = FileManager.default.temporaryDirectory
+            .appendingPathComponent("yt4s-update-model-\(UUID().uuidString)", isDirectory: true)
+        let root = sandbox.appendingPathComponent("yt-dlp", isDirectory: true)
+        // A bundled copy that starts, so the launch check finds the app intact.
+        let executable = sandbox.appendingPathComponent("YT4S.app/Contents/Resources/bin/yt-dlp/yt-dlp_macos")
+        try FileManager.default.createDirectory(at: executable.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("#!/bin/sh\necho 2026.10.20\n".utf8).write(to: executable)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executable.path)
         installations = YtDlpInstallations(root: root, bundled: BundledYtDlp(executable: executable, version: YtDlpVersion("2026.10.20")))
         bundled = YtDlpCopy(version: YtDlpVersion("2026.10.20"), executable: executable, origin: .bundled)
     }
@@ -148,5 +153,81 @@ import Testing
 
         await queue.waitUntilIdle()
         #expect(!queue.hasActiveDownloads)
+    }
+
+    // MARK: Roll back
+
+    @Test func rollBackIsOnlyOfferedOnceSomethingWasDownloaded() throws {
+        let model = model(try FakeNightlyFeed(tag: "2026.10.26.220202"))
+
+        #expect(!model.canRollBack)
+        model.rollBack()
+        #expect(model.selection.copy == bundled)
+        #expect(model.message == nil)
+    }
+
+    @Test func rollBackAfterTheFirstUpdateReturnsToTheBundledCopyUntilUpdateIsClicked() async throws {
+        let feed = try FakeNightlyFeed(tag: "2026.10.26.220202")
+        let model = model(feed)
+        await model.update()
+        #expect(model.canRollBack)
+        #expect(model.rollBackTarget == bundled)
+
+        feed.failure = URLError(.notConnectedToInternet)
+        model.rollBack()
+
+        #expect(model.selection.copy == bundled)
+        #expect(model.versionLabel == "yt-dlp 2026.10.20")
+        #expect(!model.canRollBack)
+        #expect(model.message == YtDlpUpdateModel.Message(
+            text: "Rolled back to yt-dlp 2026.10.20. Update yt-dlp returns to the newest one.",
+            isError: false
+        ))
+        await model.check()
+        #expect(!model.showsBadge)
+
+        feed.failure = nil
+        await model.update()
+        #expect(model.selection.copy.version?.tag == "2026.10.26.220202")
+        #expect(model.canRollBack)
+    }
+
+    @Test func rollBackIsDisabledWhileAnyDownloadRuns() async throws {
+        let downloads = Downloads()
+        let model = model(try FakeNightlyFeed(tag: "2026.10.26.220202"), downloads: downloads)
+        await model.update()
+        downloads.running = true
+
+        #expect(!model.canRollBack)
+        model.rollBack()
+        #expect(model.selection.copy.version?.tag == "2026.10.26.220202")
+
+        downloads.running = false
+        #expect(model.canRollBack)
+    }
+
+    // MARK: Launch fallback
+
+    @Test func launchFallsBackPastACopyThatDoesNotStart() async throws {
+        _ = try await YtDlpUpdater(installations: installations, http: try FakeNightlyFeed(tag: "2026.10.26.220202")).update()
+        try Data("#!/bin/sh\nkill -SEGV $$\n".utf8).write(to: installations.current().executable)
+        let model = model(try FakeNightlyFeed(tag: "2026.10.26.220202"))
+
+        await model.launch()
+
+        #expect(model.selection.copy == bundled)
+        #expect(!model.isDamaged)
+        model.stop()
+    }
+
+    @Test func launchShowsTheAppAsDamagedWhenNoCopyStarts() async throws {
+        try Data("#!/bin/sh\nkill -SEGV $$\n".utf8).write(to: bundled.executable)
+        let model = model(try FakeNightlyFeed(tag: "2026.10.26.220202"))
+        #expect(!model.isDamaged)
+
+        await model.launch()
+
+        #expect(model.isDamaged)
+        model.stop()
     }
 }

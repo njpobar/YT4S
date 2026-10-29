@@ -150,4 +150,18 @@ import Testing
         _ = try await updater(feed).update()
         #expect(installations.readState().pinned == false)
     }
+
+    @Test func checkOffersNothingAfterRollBackUntilUpdateIsClicked() async throws {
+        _ = try await updater(try FakeNightlyFeed(tag: "2026.10.26.220202")).update()
+        try installations.rollBack()
+        // The nightly rolled back from is withdrawn upstream: the latest is the bundled tag.
+        let feed = try FakeNightlyFeed(tag: "2026.10.26.220202")
+        #expect(try await updater(feed).check() == nil)
+
+        let outcome = try await updater(try FakeNightlyFeed(tag: "2026.10.20")).update()
+
+        #expect(outcome == .upToDate(installations.current()))
+        #expect(!installations.readState().pinned)
+        #expect(try await updater(feed).check() == YtDlpVersion("2026.10.26.220202"))
+    }
 }

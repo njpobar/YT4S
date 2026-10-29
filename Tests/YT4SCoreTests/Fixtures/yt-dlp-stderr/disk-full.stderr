@@ -1,0 +1,7 @@
+
+
+ERROR: unable to write data: [Errno 28] No space left on device
+Exception ignored while finalizing file <_io.BufferedWriter name=10>:
+Traceback (most recent call last):
+  File "yt_dlp/downloader/common.py", line 480, in download
+OSError: [Errno 28] No space left on device

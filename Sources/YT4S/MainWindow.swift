@@ -193,6 +193,10 @@ private struct QueueView: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                     Spacer()
+                    if summary.retryableFailures >= 2 {
+                        Button("Retry all failed") { queue.retryAllFailed() }
+                            .controlSize(.small)
+                    }
                     Button("Clear finished") { queue.clearFinished() }
                         .controlSize(.small)
                         .disabled(!summary.hasFinished)
@@ -228,13 +232,21 @@ private struct QueueRowView: View {
     let perform: (QueueRow.Action) -> Void
 
     var body: some View {
-        HStack(spacing: 10) {
-            details
-            HStack(spacing: 6) {
-                ForEach(row.actions, id: \.title) { action in
-                    Button(action.title) { perform(action) }
-                        .controlSize(.small)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 10) {
+                details
+                HStack(spacing: 6) {
+                    ForEach(row.actions, id: \.title) { action in
+                        Button(action.title) { perform(action) }
+                            .controlSize(.small)
+                    }
                 }
+            }
+            // Full row width, below the buttons, so opening it never moves Retry.
+            if let failureDetails = row.details {
+                FailureDetailsView(text: failureDetails)
+                    .padding(.top, -4)
+                    .padding(.bottom, 9)
             }
         }
     }
@@ -267,6 +279,35 @@ private struct QueueRowView: View {
         case .success: .green
         case .failure: .red
         case .skipped: .orange
+        }
+    }
+}
+
+/// The raw yt-dlp output of a failed row, collapsed under "Details", with Copy.
+private struct FailureDetailsView: View {
+    let text: String
+
+    var body: some View {
+        DisclosureGroup {
+            VStack(alignment: .leading, spacing: 6) {
+                ScrollView {
+                    Text(text.isEmpty ? "yt-dlp printed nothing." : text)
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(6)
+                }
+                .frame(maxHeight: 120)
+                .background(Color(nsColor: .textBackgroundColor))
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+                Button("Copy") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(text, forType: .string)
+                }
+                .controlSize(.small)
+            }
+        } label: {
+            Text("Details").font(.caption)
         }
     }
 }
