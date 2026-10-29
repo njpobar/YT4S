@@ -101,7 +101,7 @@ public enum DownloadArguments {
         machineOutput
             + ["--no-playlist"]
             + formatSelection(request.options)
-            + ["-P", request.downloadFolder.path, "-o", outputTemplate(request.options.naming)]
+            + ["-P", request.downloadFolder.path, "-o", outputTemplate]
             + ["--", request.url]
     }
 
@@ -111,6 +111,7 @@ public enum DownloadArguments {
         "--newline", "--progress",
         "--progress-template", YtDlpOutputTemplates.progress,
         "--print", YtDlpOutputTemplates.video,
+        "--print", YtDlpOutputTemplates.details,
         "--print", YtDlpOutputTemplates.file,
     ]
 
@@ -141,9 +142,7 @@ public enum DownloadArguments {
         return "bv*[height<=\(maxHeight)]+ba/b[height<=\(maxHeight)]/bv*+ba/b"
     }
 
-    static func outputTemplate(_ naming: NamingPattern) -> String {
-        switch naming {
-        case .title, .channelTitle, .dateTitle: "%(title)s.%(ext)s"
-        }
-    }
+    /// yt-dlp never picks the final name: it downloads to `<id>.<ext>` in the hidden incomplete
+    /// folder and the Queue moves the file to its Naming pattern name (see `DownloadFolder`).
+    static let outputTemplate = "\(DownloadFolder.incompleteFolderName)/%(id)s.%(ext)s"
 }

@@ -1,22 +1,5 @@
 import Foundation
 
-/// What naming needs to know about one video once yt-dlp has looked it up.
-public struct VideoDetails: Equatable, Sendable {
-    public var id: String
-    public var title: String
-    /// The video's own channel.
-    public var channel: String?
-    /// Upload date as yt-dlp gives it, `YYYYMMDD`.
-    public var uploadDate: String?
-
-    public init(id: String, title: String, channel: String? = nil, uploadDate: String? = nil) {
-        self.id = id
-        self.title = title
-        self.channel = channel
-        self.uploadDate = uploadDate
-    }
-}
-
 /// What is at a path in the Download folder, for the collision rule.
 public enum FileOccupant: Equatable, Sendable {
     case free
@@ -112,5 +95,20 @@ public struct NamePlan: Equatable, Sendable {
         guard yyyymmdd.count == 8, yyyymmdd.allSatisfy({ $0.isASCII && $0.isNumber }) else { return nil }
         let digits = Array(yyyymmdd)
         return "\(String(digits[0..<4]))-\(String(digits[4..<6]))-\(String(digits[6..<8]))"
+    }
+}
+
+extension DownloadRequest {
+    /// Where this request's video goes under its Naming pattern, once yt-dlp has looked it up.
+    public func namePlan(for video: VideoDetails) -> NamePlan {
+        NamePlan(pattern: options.naming, video: video, origin: origin)
+    }
+
+    /// The extension the finished file is expected to have, for predicting its name.
+    public var expectedFileExtension: String {
+        switch options.format {
+        case .video: "mp4"
+        case .mp3: "mp3"
+        }
     }
 }
