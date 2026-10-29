@@ -184,4 +184,72 @@ import Testing
         #expect(queue.items[2].isFinished)
         #expect(files(in: fake.downloadFolder) == ["Fake Video third.mp4"])
     }
+
+    @Test func retryRerunsAFailedVideoWithItsOriginalChoicesAfterDeletingPartialFiles() async throws {
+        let fake = try FakeYtDlp()
+        let partials = fake.downloadFolder.deletingLastPathComponent().appendingPathComponent("partial")
+        let scenarioFile = fake.downloadFolder.deletingLastPathComponent().appendingPathComponent("scenario")
+        try "network-drop".write(to: scenarioFile, atomically: true, encoding: .utf8)
+        let queue = Queue(
+            runner: fake.runner(scenario: "success", extraEnvironment: ["YT4S_FAKE_SCENARIO_FILE": scenarioFile.path]),
+            partialFilesFolder: partials
+        )
+        let original = DownloadRequest(
+            url: "https://www.youtube.com/watch?v=abc123",
+            downloadFolder: fake.downloadFolder,
+            options: .default
+        )
+
+        let id = queue.add(original)
+        await queue.waitUntilIdle()
+        #expect(queue.items[0].isFailed)
+        let firstArgv = try fake.loggedArgv()
+
+        // A stray partial file from the failed attempt must not be resumed or left behind.
+        let stray = queue.partialFilesFolder(for: id).appendingPathComponent("Fake Video abc123.mp4.part")
+        try FileManager.default.createDirectory(at: stray.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "stale".write(to: stray, atomically: true, encoding: .utf8)
+        try "success".write(to: scenarioFile, atomically: true, encoding: .utf8)
+
+        queue.retry(id)
+        #expect(queue.items[0].state == .pending)
+        await queue.waitUntilIdle()
+
+        #expect(queue.items.count == 1)
+        #expect(queue.items[0].isFinished)
+        #expect(queue.items[0].request == original)
+        #expect(try fake.loggedArgv() == firstArgv)
+        #expect(files(in: partials).isEmpty)
+        #expect(files(in: fake.downloadFolder) == ["Fake Video abc123.mp4"])
+    }
+
+    @Test func retryBringsBackACancelledVideo() async throws {
+        let fake = try FakeYtDlp()
+        let queue = Queue(runner: fake.runner(scenario: "slow", extraEnvironment: ["YT4S_FAKE_STEP_DELAY": "0.1"]))
+
+        queue.add(request(fake, id: "first"))
+        let second = queue.add(request(fake, id: "second"))
+        queue.cancel(second)
+        await queue.waitUntilIdle()
+        #expect(queue.items[1].state == .cancelled)
+
+        queue.retry(second)
+        await queue.waitUntilIdle()
+
+        #expect(queue.items[1].isFinished)
+    }
+
+    @Test func retryLeavesFinishedAndActiveVideosAlone() async throws {
+        let fake = try FakeYtDlp()
+        let queue = Queue(runner: fake.runner(scenario: "success"))
+
+        let id = queue.add(request(fake))
+        await queue.waitUntilIdle()
+        let finished = queue.items[0].state
+
+        queue.retry(id)
+
+        #expect(queue.items[0].state == finished)
+        #expect(queue.isIdle)
+    }
 }

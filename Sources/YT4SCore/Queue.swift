@@ -106,6 +106,15 @@ public final class Queue {
         }
     }
 
+    /// Re-runs a failed or cancelled item with its original request (Format, Quality preset,
+    /// Naming pattern, Download folder), deleting its partial files first. No effect on other states.
+    public func retry(_ id: QueueItem.ID) {
+        guard let item = items.first(where: { $0.id == id }), item.isFailed || item.state == .cancelled else { return }
+        deletePartialFiles(partialFilesFolder(for: id))
+        update(id) { $0.state = .pending }
+        startWorkerIfNeeded()
+    }
+
     private func startWorkerIfNeeded() {
         guard worker == nil else { return }
         worker = Task { [weak self] in
