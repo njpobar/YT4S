@@ -59,6 +59,15 @@ final class TestDefaults {
         #expect(suite.defaults.string(forKey: Settings.Key.naming) == "title")
     }
 
+    @Test func mp3And720pSurviveRelaunchUnderStableStoredValues() {
+        let suite = TestDefaults()
+        suite.relaunch().options = DownloadOptions(format: .mp3, quality: .p720, naming: .title)
+
+        #expect(suite.defaults.string(forKey: Settings.Key.format) == "mp3")
+        #expect(suite.defaults.string(forKey: Settings.Key.quality) == "720p")
+        #expect(suite.relaunch().options == DownloadOptions(format: .mp3, quality: .p720, naming: .title))
+    }
+
     @Test func unreadableValuesFallBackToDefaults() {
         let suite = TestDefaults()
         suite.defaults.set("hologram", forKey: Settings.Key.format)
