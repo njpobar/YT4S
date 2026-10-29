@@ -33,19 +33,21 @@ public final class Settings {
         set { defaults.set(newValue.path, forKey: Key.downloadFolder) }
     }
 
-    /// Format, Quality preset and Naming pattern preset, each under its own key.
+    /// Format, Quality preset, Naming pattern and custom pattern text, each under its own key.
     public var options: DownloadOptions {
         get {
             DownloadOptions(
                 format: value(Key.format) ?? DownloadOptions.default.format,
                 quality: value(Key.quality) ?? DownloadOptions.default.quality,
-                naming: value(Key.naming) ?? DownloadOptions.default.naming
+                naming: value(Key.naming) ?? DownloadOptions.default.naming,
+                customTemplate: customPattern
             )
         }
         set {
             defaults.set(newValue.format.rawValue, forKey: Key.format)
             defaults.set(newValue.quality.rawValue, forKey: Key.quality)
             defaults.set(newValue.naming.rawValue, forKey: Key.naming)
+            customPattern = newValue.customTemplate
         }
     }
 

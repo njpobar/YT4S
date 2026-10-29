@@ -8,7 +8,9 @@ public struct QueueSummary: Equatable, Sendable {
     public var alreadyDownloaded = 0
     public var failed = 0
     public var cancelled = 0
-    /// Failed rows that Retry can help; "Retry all failed" shows when there are 2 or more.
+    public var notStarted = 0
+    /// Failed rows that Retry can help, plus Not started rows (Retry all failed resumes them);
+    /// "Retry all failed" shows when there are 2 or more.
     public var retryableFailures = 0
     /// Whether "Clear finished" has anything to remove.
     public var hasFinished: Bool
@@ -24,6 +26,9 @@ public struct QueueSummary: Equatable, Sendable {
                 failed += 1
                 if failure.category.isRetryable { retryableFailures += 1 }
             case .cancelled: cancelled += 1
+            case .notStarted:
+                notStarted += 1
+                retryableFailures += 1
             }
         }
     }
@@ -36,6 +41,7 @@ public struct QueueSummary: Equatable, Sendable {
             (alreadyDownloaded, "already downloaded"),
             (failed, "failed"),
             (cancelled, "cancelled"),
+            (notStarted, "not started"),
         ]
         .filter { $0.0 > 0 }
         .map { "\($0.0) \($0.1)" }

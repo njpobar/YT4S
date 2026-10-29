@@ -12,14 +12,40 @@ public final class MainWindowModel {
     }
     /// The choices new Queue items are downloaded with. Saved across launches.
     public var options: DownloadOptions {
-        didSet { settings?.options = options }
+        didSet {
+            if options.naming == .custom, oldValue.naming != .custom, options.customTemplate.isEmpty {
+                options.customTemplate = CustomNamingTemplate.starter
+            }
+            settings?.options = options
+            if options.naming != oldValue.naming || options.customTemplate != oldValue.customTemplate
+                || options.format != oldValue.format {
+                refreshCustomPreview()
+            }
+        }
     }
+    /// Whether the Naming pattern control offers Custom. Saved across launches. Turning it off
+    /// while Custom is chosen goes back to Title (the template text is kept).
+    public var advancedNaming: Bool {
+        didSet {
+            settings?.advancedNaming = advancedNaming
+            if !advancedNaming, options.naming == .custom { options.naming = .title }
+        }
+    }
+    /// The Naming patterns the control offers.
+    public var namingChoices: [NamingPattern] {
+        advancedNaming ? NamingPattern.presets + [.custom] : NamingPattern.presets
+    }
+    /// The live example (or why the template is invalid) for the custom Naming pattern; `nil`
+    /// when a preset is chosen or before the first render.
+    public private(set) var customPreview: CustomNamePreview?
     /// A plain sentence shown near the Download button, or `nil`.
     public private(set) var errorMessage: String?
 
     public let queue: Queue
     /// Where choices are saved; `nil` for a model that saves nothing.
     @ObservationIgnored private let settings: Settings?
+    @ObservationIgnored private let renderCustomName: @Sendable (String, Format) async -> CustomNamePreview
+    @ObservationIgnored private var customPreviewTask: Task<Void, Never>?
 
     public nonisolated static var defaultDownloadFolder: URL {
         FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
@@ -27,19 +53,63 @@ public final class MainWindowModel {
     }
 
     /// Starts from the saved choices (first-run defaults if none) and saves every change.
-    public init(queue: Queue, settings: Settings) {
+    /// `renderCustomName` previews a custom template (default: the queue's yt-dlp, offline).
+    public init(
+        queue: Queue, settings: Settings,
+        renderCustomName: (@Sendable (String, Format) async -> CustomNamePreview)? = nil
+    ) {
         self.queue = queue
         self.settings = settings
+        self.renderCustomName = renderCustomName ?? Self.previewer(queue)
         self.downloadFolder = settings.downloadFolder
-        self.options = settings.options
+        self.advancedNaming = settings.advancedNaming
+        var options = settings.options
+        if !settings.advancedNaming, options.naming == .custom { options.naming = .title }
+        self.options = options
+        refreshCustomPreview()
     }
 
     /// A model that saves nothing, starting from default options.
     public init(queue: Queue, downloadFolder: URL = MainWindowModel.defaultDownloadFolder) {
         self.queue = queue
         self.settings = nil
+        self.renderCustomName = Self.previewer(queue)
         self.downloadFolder = downloadFolder
         self.options = .default
+        self.advancedNaming = false
+    }
+
+    private static func previewer(_ queue: Queue) -> @Sendable (String, Format) async -> CustomNamePreview {
+        let previewer = CustomNamePreviewer(runner: queue.runner)
+        return { await previewer.preview($0, format: $1) }
+    }
+
+    /// Re-renders the custom preview once typing pauses; only the latest template is shown.
+    private func refreshCustomPreview() {
+        customPreviewTask?.cancel()
+        guard options.naming == .custom else {
+            customPreview = nil
+            customPreviewTask = nil
+            return
+        }
+        let template = options.customTemplate
+        let format = options.format
+        let render = renderCustomName
+        customPreviewTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled else { return }
+            let preview = await render(template, format)
+            guard !Task.isCancelled, let self else { return }
+            self.customPreview = preview
+        }
+    }
+
+    /// Returns once the custom preview shows the current template.
+    public func waitForCustomPreview() async {
+        while let task = customPreviewTask {
+            await task.value
+            if task == customPreviewTask { return }
+        }
     }
 
     /// The user picked another Download folder with "Change...".
@@ -75,6 +145,10 @@ public final class MainWindowModel {
         let paste = paste
         let sources = paste.sources
         guard !sources.isEmpty else { return }
+        if options.naming == .custom, case .invalid(let reason) = customPreview {
+            errorMessage = "Fix the custom file name pattern first. \(reason)"
+            return
+        }
         // The folder is created on first Download, never at launch, and recreated if it went
         // missing, but only inside an existing parent. Never falls back to another folder.
         var isDirectory: ObjCBool = false

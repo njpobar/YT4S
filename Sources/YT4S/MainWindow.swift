@@ -11,13 +11,20 @@ struct MainWindow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            if model.queue.showsOutdatedBanner {
+                OutdatedBannerView(
+                    text: OutdatedBanner.text(updateAppliedThisSession: ytDlpUpdates.hasAppliedUpdateThisSession),
+                    dismiss: { model.queue.dismissOutdatedBanner() }
+                )
+                .padding(.bottom, 12)
+            }
             PasteBox(text: $model.pasteText)
             PasteLabels(paste: model.paste, listingMessage: model.listingMessage)
 
             FormatRow(options: $model.options)
                 .padding(.top, 12)
 
-            NamingRow(options: $model.options)
+            NamingRow(model: model)
                 .padding(.top, 12)
 
             HStack(alignment: .bottom) {
@@ -58,7 +65,7 @@ struct MainWindow: View {
 
             Divider()
                 .padding(.vertical, 10)
-            UpdateFooter(ytDlp: ytDlpUpdates, app: appUpdate)
+            UpdateFooter(ytDlp: ytDlpUpdates, app: appUpdate, highlightsUpdateYtDlp: model.queue.showsOutdatedBanner)
         }
         .padding(18)
         .frame(minWidth: 560, minHeight: 640)
@@ -125,25 +132,93 @@ private struct FormatRow: View {
     }
 }
 
-/// "File names": the Naming pattern preset, with an example name in the chosen Format.
+/// "File names": the Naming pattern, with an example name in the chosen Format. The Advanced
+/// checkbox adds Custom: a yt-dlp output template field with a live preview under it.
 private struct NamingRow: View {
-    @Binding var options: DownloadOptions
+    @Bindable var model: MainWindowModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             SectionLabel("File names")
             HStack(spacing: 10) {
-                Picker("Naming pattern", selection: $options.naming) {
-                    ForEach(NamingPattern.allCases, id: \.self) { Text($0.label) }
+                Picker("Naming pattern", selection: $model.options.naming) {
+                    ForEach(model.namingChoices, id: \.self) { Text($0.label) }
                 }
                 .labelsHidden()
                 .fixedSize()
-                Text("e.g. \(options.naming.example(format: options.format))")
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                if model.options.naming != .custom {
+                    Text("e.g. \(model.options.naming.example(format: model.options.format))")
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                Spacer(minLength: 0)
+                Toggle("Advanced", isOn: $model.advancedNaming)
+                    .toggleStyle(.checkbox)
+                    .controlSize(.small)
+                    .help("Offer Custom: write the file name as a yt-dlp output template")
+            }
+            if model.options.naming == .custom {
+                TextField("Template", text: $model.options.customTemplate, prompt: Text(CustomNamingTemplate.starter))
+                    .font(.system(.body, design: .monospaced))
+                    .textFieldStyle(.roundedBorder)
+                    .labelsHidden()
+                    .autocorrectionDisabled()
+                    .help("A yt-dlp output template, e.g. %(channel)s/%(title)s. A / makes a folder; the extension is added for you.")
+                CustomPreviewLine(preview: model.customPreview)
             }
         }
+    }
+}
+
+/// Under the custom template: the example name, or why the template is invalid.
+private struct CustomPreviewLine: View {
+    let preview: CustomNamePreview?
+
+    var body: some View {
+        Group {
+            switch preview {
+            case .example(let name):
+                Text("e.g. \(name)").foregroundStyle(.secondary)
+            case .invalid(let reason):
+                Text(reason).foregroundStyle(.red)
+            case nil:
+                Text("e.g. ...").foregroundStyle(.secondary)
+            }
+        }
+        .font(.callout)
+        .lineLimit(1)
+        .truncationMode(.middle)
+        .textSelection(.enabled)
+    }
+}
+
+/// "YouTube may have changed..." (prototype nudge): points at the footer's Update yt-dlp, which
+/// is highlighted while this shows; it never runs the update itself (ADR 0002).
+private struct OutdatedBannerView: View {
+    let text: String
+    let dismiss: () -> Void
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+            Text(text)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Button(action: dismiss) {
+                Image(systemName: "xmark")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.borderless)
+            .help("Dismiss")
+            .accessibilityLabel("Dismiss")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.orange.opacity(0.45)))
     }
 }
 
