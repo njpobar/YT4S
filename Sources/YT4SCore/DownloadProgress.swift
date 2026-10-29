@@ -32,6 +32,8 @@ public struct DownloadProgress: Equatable, Sendable {
             fraction = 1
             speed = nil
             eta = 0
+        case .entry:
+            break
         }
     }
 

@@ -8,7 +8,8 @@
 #   YT4S_FAKE_ERROR_MESSAGE  overrides the ERROR line text for failing scenarios ("<id>" is replaced)
 #   YT4S_FAKE_STEP_DELAY     seconds between progress steps (default 0, slow: 1)
 #   YT4S_FAKE_VERSION        printed by --version (default 2026.10.21)
-#   YT4S_FAKE_PLAYLIST_IDS   entries for playlist/channel URLs (default p1,p2,p3)
+#   YT4S_FAKE_PLAYLIST_IDS   entries for playlist/channel URLs (default p1,p2,p3; empty: no entries)
+#   YT4S_FAKE_PLAYLIST_ERROR if set, listing a playlist/channel fails with this ERROR text (exit 1)
 #   YT4S_FAKE_ARGV_LOG       if set, argv is written there, each element NUL-terminated
 #
 # Contract notes (mirrors real yt-dlp):
@@ -62,7 +63,7 @@ while (( $# )); do
   case $arg in
     --version) print -r -- "${YT4S_FAKE_VERSION:-2026.10.21}"; exit 0 ;;
     --ignore-config|--no-update|--newline|--no-progress|--progress|--no-warnings|--no-playlist|--yes-playlist \
-      |--embed-thumbnail|--embed-metadata|--no-embed-thumbnail|--no-embed-metadata|--force-overwrites|--no-overwrites \
+      |--embed-thumbnail|--embed-metadata|--no-embed-thumbnail|--no-embed-metadata|--embed-chapters|--no-embed-chapters|--force-overwrites|--no-overwrites \
       |--no-part|--restrict-filenames|--windows-filenames|--no-mtime|--no-color|--ignore-errors|--abort-on-error \
       |--no-abort-on-error|--flat-playlist|--no-flat-playlist|--no-cache-dir|--no-colors)
       seen[$arg]=1 ;;
@@ -252,9 +253,12 @@ process_video() {  # process_video ID [PLAYLIST_TITLE INDEX COUNT CHANNEL]
   info[requested_formats.:.filesize,filesize_approx]='[]'
   info[filesize,filesize_approx]=10485760
   info[webpage_url]="https://www.youtube.com/watch?v=$id"
+  info[url]=${info[webpage_url]}
   info[playlist_title]=${2:-NA}
   info[playlist_index]=${3:-NA}
   info[playlist_count]=${4:-NA}
+  info[playlist_channel,playlist_uploader]=${5:-NA}
+  info[channel,uploader]=${info[channel]}
   if (( extract_audio )); then info[ext]=${audio_format:-mp3}; else info[ext]=mp4; fi
 
   local relative=$(render "$output_template")
@@ -316,18 +320,51 @@ is_collection() {
   [[ $1 == *list=* || $1 == */playlist* || $1 == */@* || $1 == */channel/* || $1 == */c/* || $1 == */user/* ]]
 }
 
+# list_entry ID PLAYLIST_TITLE INDEX COUNT PLAYLIST_CHANNEL: --flat-playlist lists without looking the video up,
+# so only the "video" stage prints; like real yt-dlp, the entry's own channel is unknown for channel tabs.
+list_entry() {
+  info=()
+  info[id]=$1
+  info[title]="Fake Video $1"
+  info[url]="https://www.youtube.com/watch?v=$1"
+  info[playlist_title]=$2
+  info[playlist_index]=$3
+  info[playlist_count]=$4
+  info[playlist_channel,playlist_uploader]=$5
+  info[channel,uploader]=${6:-NA}
+  emit_prints video
+}
+
 for url in "${urls[@]}"; do
   if is_collection "$url"; then
-    entries=("${(@s:,:)${YT4S_FAKE_PLAYLIST_IDS:-p1,p2,p3}}")
-    if [[ $url =~ '[?&]list=([A-Za-z0-9_-]+)' ]]; then name=${match[1]}; else name=${${url%%\?*}:t}; name=${name#@}; fi
-    title="Fake Playlist $name"
-    channel="Fake Channel"
-    [[ $url == */@* ]] && { title="Fake Channel $name"; channel="Fake Channel $name"; }
+    entries=()
+    ids=${YT4S_FAKE_PLAYLIST_IDS-p1,p2,p3}
+    [[ -n $ids ]] && entries=("${(@s:,:)ids}")
+    is_channel=0
+    if [[ $url =~ '/(@|channel/|user/|c/)([^/?]+)' ]]; then
+      is_channel=1; name=${match[2]}
+      title="$name - Videos"; channel=$name
+    else
+      [[ $url =~ '[?&]list=([A-Za-z0-9_-]+)' ]] && name=${match[1]} || name=${${url%%\?*}:t}
+      title="Fake Playlist $name"; channel="Fake Channel"
+    fi
     say "[youtube:tab] Extracting URL: $url"
+    if [[ -n ${YT4S_FAKE_PLAYLIST_ERROR:-} ]]; then
+      print -u2 -r -- "ERROR: $YT4S_FAKE_PLAYLIST_ERROR"
+      any_failed=1; continue
+    fi
     say "[download] Downloading playlist: $title"
     for (( i = 1; i <= ${#entries}; i++ )); do
       say "[download] Downloading item $i of ${#entries}"
-      process_video "${entries[i]}" "$title" $i ${#entries} "$channel"
+      if [[ -n ${seen[--flat-playlist]:-} ]]; then
+        if (( is_channel )); then
+          list_entry "${entries[i]}" "$title" $i ${#entries} "$channel"
+        else
+          list_entry "${entries[i]}" "$title" $i ${#entries} "$channel" "$channel"
+        fi
+      else
+        process_video "${entries[i]}" "$title" $i ${#entries} "$channel"
+      fi
     done
   else
     process_video "$(video_id_for "$url")"

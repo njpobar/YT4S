@@ -2,7 +2,7 @@ import SwiftUI
 import YT4SCore
 
 /// The one-column main window (prototype variant A, issue #9), top to bottom:
-/// paste box, [Format / Naming pattern rows: later tickets], Download folder + Download button,
+/// paste box, Format row, [Naming pattern row: later ticket], Download folder + Download button,
 /// Queue, update footer.
 struct MainWindow: View {
     @Bindable var model: MainWindowModel
@@ -11,15 +11,24 @@ struct MainWindow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             PasteBox(text: $model.pasteText)
+            PasteLabels(paste: model.paste, listingMessage: model.listingMessage)
+
+            FormatRow(options: $model.options)
+                .padding(.top, 12)
 
             HStack(alignment: .bottom) {
                 VStack(alignment: .leading, spacing: 5) {
                     SectionLabel("Save to")
-                    Text(model.downloadFolder.abbreviatingWithTildeInPath)
-                        .font(.system(.body, design: .monospaced))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .textSelection(.enabled)
+                    HStack(spacing: 8) {
+                        Text(model.downloadFolder.abbreviatingWithTildeInPath)
+                            .font(.system(.body, design: .monospaced))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .textSelection(.enabled)
+                            .help(model.downloadFolder.path)
+                        Button("Change...") { chooseDownloadFolder() }
+                            .controlSize(.small)
+                    }
                 }
                 Spacer(minLength: 16)
                 Button("Download") { model.download() }
@@ -52,6 +61,25 @@ struct MainWindow: View {
     }
 }
 
+extension MainWindow {
+    /// Folder picker for "Change...". Opens at the current folder, or its parent if it is gone.
+    func chooseDownloadFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Choose"
+        panel.message = "Choose where YT4S saves downloads."
+        let current = model.downloadFolder
+        panel.directoryURL = FileManager.default.fileExists(atPath: current.path)
+            ? current : current.deletingLastPathComponent()
+        if panel.runModal() == .OK, let url = panel.url {
+            model.chooseDownloadFolder(url)
+        }
+    }
+}
+
 private struct SectionLabel: View {
     let text: String
 
@@ -62,6 +90,34 @@ private struct SectionLabel: View {
             .font(.system(size: 11))
             .kerning(0.5)
             .foregroundStyle(.secondary)
+    }
+}
+
+/// "Get": Format (Video / MP3) and, for Video, the Quality preset.
+private struct FormatRow: View {
+    @Binding var options: DownloadOptions
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            SectionLabel("Get")
+            HStack(spacing: 10) {
+                Picker("Format", selection: $options.format) {
+                    ForEach(Format.allCases, id: \.self) { Text($0.label) }
+                }
+                .fixedSize()
+                if options.format.usesQualityPreset {
+                    Picker("Quality", selection: $options.quality) {
+                        ForEach(QualityPreset.allCases, id: \.self) { Text($0.label) }
+                    }
+                    .fixedSize()
+                } else {
+                    Text("High quality, with cover art")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+        }
     }
 }
 

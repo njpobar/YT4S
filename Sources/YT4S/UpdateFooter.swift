@@ -83,7 +83,7 @@ extension YT4SApp {
         let queue = Queue(runner: YtDlpRunner(tools: BundledTools(resourcesDirectory: resources), selection: updates.selection))
         queueBox.queue = queue
         Task { await updates.launch() }
-        return (MainWindowModel(queue: queue), updates)
+        return (MainWindowModel(queue: queue, settings: Settings(defaults: .standard)), updates)
     }
 }
 
