@@ -73,7 +73,8 @@ import Testing
 
     @Test func cancellingTheConsumerTerminatesYtDlp() async throws {
         let fake = try FakeYtDlp()
-        let runner = fake.runner(scenario: "slow")
+        // 4 steps of 10s: an uncancelled run takes 40s, far above the bound even on a loaded machine.
+        let runner = fake.runner(scenario: "slow", extraEnvironment: ["YT4S_FAKE_STEP_DELAY": "10"])
         let started = ContinuousClock.now
         let task = Task {
             for try await _ in runner.run(DownloadArguments.arguments(for: request(fake))) {}
@@ -82,7 +83,7 @@ import Testing
         task.cancel()
         _ = await task.result
 
-        #expect(ContinuousClock.now - started < .seconds(2))
+        #expect(ContinuousClock.now - started < .seconds(20))
     }
 
     @Test func aMissingExecutableThrows() async throws {
