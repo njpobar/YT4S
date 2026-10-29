@@ -57,7 +57,7 @@ public enum YtDlpUpdateOutcome: Equatable, Sendable {
 /// Updates yt-dlp from the upstream nightly channel (ADR 0002). Never uses `yt-dlp -U`.
 ///
 /// Update: latest release -> download zip + `SHA2-256SUMS` -> verify SHA-256 -> unzip to staging ->
-/// `--version` smoke test -> atomic rename into `<root>/<tag>/` -> flip `state.json`.
+/// thin to arm64 -> `--version` smoke test -> atomic rename into `<root>/<tag>/` -> flip `state.json`.
 /// Any failure discards staging and throws, leaving the current copy in use. No retries.
 public struct YtDlpUpdater: Sendable {
     public static let latestNightlyAPI = URL(string: "https://api.github.com/repos/yt-dlp/yt-dlp-nightly-builds/releases/latest")!
@@ -177,6 +177,9 @@ public struct YtDlpUpdater: Sendable {
         )
         guard result?.termination == .exited(0) else { throw YtDlpUpdateError.unpackFailed }
         try? FileManager.default.removeItem(at: zip)
+        // Apple Silicon only, like the bundled copy (build-app.sh): halves the copy on disk. The
+        // smoke test that follows runs the thinned copy.
+        do { try UniversalBinary.thinToArm64(in: directory) } catch { throw YtDlpUpdateError.unpackFailed }
     }
 
     private func smokeTest(_ executable: URL, expecting version: YtDlpVersion) async throws {

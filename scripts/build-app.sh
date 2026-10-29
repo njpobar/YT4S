@@ -66,7 +66,23 @@ EOF
 
 "$REPO_ROOT/scripts/write-info-plist.sh" "$CONTENTS/Info.plist" "$version" "$build_number"
 
-# ---- 3. Ad-hoc sign, inside-out --------------------------------------------------------------
+# ---- 3. Slim down ----------------------------------------------------------------------------
+# YT4S runs on Apple Silicon only, so the x86_64 halves of universal binaries (the yt-dlp onedir,
+# Sparkle) are dead weight. Each slice carries its own signature; everything is re-signed below.
+
+step "Thinning universal binaries to arm64"
+while IFS= read -r -d '' file; do
+  if file -b "$file" | grep -q 'universal binary'; then
+    lipo -thin arm64 "$file" -output "$file.arm64"
+    chmod "$(stat -f '%Lp' "$file")" "$file.arm64"
+    mv "$file.arm64" "$file"
+  fi
+done < <(find "$APP" -type f -print0)
+
+# Local symbols only; ffmpeg and ffprobe are fully static, so nothing looks them up at run time.
+strip "$BIN/ffmpeg" "$BIN/ffprobe" 2> /dev/null
+
+# ---- 4. Ad-hoc sign, inside-out --------------------------------------------------------------
 # No Hardened Runtime (-o runtime), no entitlements, no App Sandbox (ADR 0002).
 
 sign() { codesign --force --sign - --timestamp=none "$@"; }
@@ -91,6 +107,13 @@ step "Signing yt-dlp onedir binaries"
 while IFS= read -r -d '' framework; do
   restore_framework_symlinks "$framework"
 done < <(find "$BIN/yt-dlp" -type d -name '*.framework' -print0)
+# PyInstaller's _internal/Python is a symlink to the framework's binary; the zip made it a copy.
+internal="$BIN/yt-dlp/_internal"
+if [ -f "$internal/Python" ] && [ ! -L "$internal/Python" ] \
+  && cmp -s "$internal/Python" "$internal/Python.framework/Versions/Current/Python"; then
+  rm "$internal/Python"
+  ln -s Python.framework/Versions/Current/Python "$internal/Python"
+fi
 while IFS= read -r -d '' file; do
   if file -b "$file" | grep -q 'Mach-O'; then sign "$file"; fi
 done < <(find "$BIN/yt-dlp" -type f ! -path '*.framework/*' -print0)
@@ -112,10 +135,17 @@ sign "$sparkle"
 step "Signing YT4S.app"
 sign "$APP"
 
-# ---- 4. Post-signing gate --------------------------------------------------------------------
+# ---- 5. Post-signing gate --------------------------------------------------------------------
 
 step "Gate: codesign --verify --deep --strict"
 codesign --verify --deep --strict --verbose=2 "$APP"
+
+step "Gate: every binary is arm64 only"
+while IFS= read -r -d '' file; do
+  if file -b "$file" | grep -q 'Mach-O'; then
+    [ "$(lipo -archs "$file")" = arm64 ] || die "gate: $file is $(lipo -archs "$file"), not arm64 only"
+  fi
+done < <(find "$APP" -type f -print0)
 
 gate_run() {  # gate_run LABEL CMD...: runs CMD from inside the bundle, shows its first line
   local output

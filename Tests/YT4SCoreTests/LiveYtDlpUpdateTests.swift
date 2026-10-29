@@ -29,6 +29,9 @@ struct LiveYtDlpUpdateTests {
         #expect(installations.readState() == YtDlpState(active: available.tag))
         let run = try await Subprocess.run(executable: copy.executable, arguments: ["--version"])
         #expect(run.stdout.trimmingCharacters(in: .whitespacesAndNewlines) == available.tag)
+        // Thinned to arm64 like the bundled copy.
+        let kind = try await Subprocess.run(executable: URL(fileURLWithPath: "/usr/bin/file"), arguments: ["-b", copy.executable.path])
+        #expect(kind.stdout.contains("arm64") && !kind.stdout.contains("universal"))
         #expect(try await updater.update() == .upToDate(copy))
         #expect(try await updater.check() == nil)
     }
