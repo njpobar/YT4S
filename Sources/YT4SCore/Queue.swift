@@ -74,6 +74,9 @@ public final class Queue {
     public private(set) var items: [QueueItem] = []
 
     @ObservationIgnored private let runner: YtDlpRunner
+    /// Called each time the Queue runs out of work, with the summary at that moment.
+    /// The app posts the batch notification from here when it is in the background.
+    @ObservationIgnored public var onBatchFinished: (@MainActor (QueueSummary) -> Void)?
     @ObservationIgnored private let partialFilesFolder: URL
     @ObservationIgnored private var worker: Task<Void, Never>?
     /// The item yt-dlp is working on, with the task to cancel to stop it.
@@ -155,7 +158,9 @@ public final class Queue {
                 await task.value
                 self.current = nil
             }
-            self?.worker = nil
+            guard let self else { return }
+            self.worker = nil
+            self.onBatchFinished?(QueueSummary(self.items))
         }
     }
 

@@ -302,4 +302,20 @@ import Testing
 
         #expect(!queue.isDownloading)
     }
+
+    @Test func reportsOnceWhenABatchFinishes() async throws {
+        let fake = try FakeYtDlp()
+        let queue = Queue(runner: fake.runner(scenario: "video-failure", extraEnvironment: ["YT4S_FAKE_FAIL_IDS": "bad"]))
+        var reports: [String] = []
+        queue.onBatchFinished = { reports.append($0.text) }
+
+        queue.add(request(fake, id: "good"))
+        queue.add(request(fake, id: "bad"))
+        await queue.waitUntilIdle()
+        #expect(reports == ["1 downloaded, 1 failed"])
+
+        queue.add(request(fake, id: "again"))
+        await queue.waitUntilIdle()
+        #expect(reports == ["1 downloaded, 1 failed", "2 downloaded, 1 failed"])
+    }
 }
