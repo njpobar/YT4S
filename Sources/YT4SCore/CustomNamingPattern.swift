@@ -1,6 +1,7 @@
 import Foundation
 
-/// The custom Naming pattern: a raw yt-dlp output template, e.g. `%(channel)s/%(title)s`.
+/// The custom Naming pattern, written in yt-dlp's output template language, e.g.
+/// `%(channel)s/%(title)s`.
 ///
 /// yt-dlp itself renders it (full template language: formatting, defaults, alternatives, dates)
 /// as the last field of the `YT4S-DETAILS` line, never as yt-dlp's own output name. YT4S then
@@ -9,7 +10,7 @@ import Foundation
 /// A `/` typed in the template makes a folder; a `/` inside a value (e.g. a title "AC/DC") does
 /// not, as with yt-dlp's own `-o`. `--print` does not sanitize values, so literal slashes are sent
 /// to yt-dlp as `folderSeparator` and split on afterwards.
-public struct CustomNamingTemplate: Equatable, Sendable {
+public struct CustomNamingPattern: Equatable, Sendable {
     /// Stands for a folder break in the rendered text (U+001F UNIT SEPARATOR, never in a title).
     public static let folderSeparator: Character = "\u{1F}"
     /// What first choosing Custom starts from.
@@ -77,7 +78,7 @@ extension NamePlan {
     /// folder, the last is the stem. No index prefix: the template replaces the auto layout.
     /// Empty parts (`a//b`, a leading `/`) are dropped by `relativePath`.
     public init(customName: String) {
-        var parts = customName.split(separator: CustomNamingTemplate.folderSeparator, omittingEmptySubsequences: false)
+        var parts = customName.split(separator: CustomNamingPattern.folderSeparator, omittingEmptySubsequences: false)
             .map(String.init)
         let stem = parts.removeLast()
         self.init(folders: parts, stem: stem)

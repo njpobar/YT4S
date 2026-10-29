@@ -27,11 +27,11 @@ public struct CustomNamePreviewer: Sendable {
 
     public func preview(_ template: String, format: Format) async -> CustomNamePreview {
         guard !template.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return .invalid("Type a yt-dlp output template, e.g. \(CustomNamingTemplate.starter)")
+            return .invalid("Type a pattern in yt-dlp's output template language, e.g. \(CustomNamingPattern.starter)")
         }
         let request = DownloadRequest(
             url: Source.video(id: Self.sample.id).url, downloadFolder: URL(fileURLWithPath: "/"),
-            options: DownloadOptions(format: format, quality: .best, naming: .custom, customTemplate: template),
+            options: DownloadOptions(format: format, quality: .best, naming: .custom, customPattern: template),
             origin: Self.sampleOrigin
         )
         let infoFile = FileManager.default.temporaryDirectory
@@ -41,7 +41,7 @@ public struct CustomNamePreviewer: Sendable {
             try Self.sampleInfoJSON.write(to: infoFile)
             // `before_dl` never fires while simulating, so the preview prints at the `video` stage.
             let arguments = ["--load-info-json", infoFile.path, "--simulate", "--print", YtDlpOutputTemplates.details(request.options)]
-                + CustomNamingTemplate.originMetadata(request)
+                + CustomNamingPattern.originMetadata(request)
             var rendered: VideoDetails?
             for try await update in runner.run(arguments) {
                 switch update {
@@ -57,7 +57,7 @@ public struct CustomNamePreviewer: Sendable {
                 }
             }
         } catch {}
-        return .invalid("Couldn't preview the template: yt-dlp did not run.")
+        return .invalid("Couldn't preview the pattern: yt-dlp did not run.")
     }
 
     /// yt-dlp's reason from a usage error such as
@@ -65,7 +65,7 @@ public struct CustomNamePreviewer: Sendable {
     /// template and any `at index N` are YT4S's internal form, so they are left out.
     static func reason(stderr: String) -> String {
         guard let line = stderr.split(whereSeparator: \.isNewline).last(where: { $0.contains("error: ") }) else {
-            return "Couldn't preview the template."
+            return "Couldn't preview the pattern."
         }
         var reason = String(line)
         if let quoteEnd = reason.range(of: "\": ", options: .backwards) {
@@ -76,7 +76,7 @@ public struct CustomNamePreviewer: Sendable {
         if let index = reason.range(of: #" at index \d+$"#, options: .regularExpression) {
             reason.removeSubrange(index)
         }
-        return "Invalid template: \(reason)"
+        return "Invalid pattern: \(reason)"
     }
 
     /// A minimal info dict yt-dlp accepts offline: one progressive format, so format selection

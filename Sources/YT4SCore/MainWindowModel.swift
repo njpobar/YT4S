@@ -13,18 +13,18 @@ public final class MainWindowModel {
     /// The choices new Queue items are downloaded with. Saved across launches.
     public var options: DownloadOptions {
         didSet {
-            if options.naming == .custom, oldValue.naming != .custom, options.customTemplate.isEmpty {
-                options.customTemplate = CustomNamingTemplate.starter
+            if options.naming == .custom, oldValue.naming != .custom, options.customPattern.isEmpty {
+                options.customPattern = CustomNamingPattern.starter
             }
             settings?.options = options
-            if options.naming != oldValue.naming || options.customTemplate != oldValue.customTemplate
+            if options.naming != oldValue.naming || options.customPattern != oldValue.customPattern
                 || options.format != oldValue.format {
                 refreshCustomPreview()
             }
         }
     }
     /// Whether the Naming pattern control offers Custom. Saved across launches. Turning it off
-    /// while Custom is chosen goes back to Title (the template text is kept).
+    /// while Custom is chosen goes back to Title (the custom pattern text is kept).
     public var advancedNaming: Bool {
         didSet {
             settings?.advancedNaming = advancedNaming
@@ -35,7 +35,7 @@ public final class MainWindowModel {
     public var namingChoices: [NamingPattern] {
         advancedNaming ? NamingPattern.presets + [.custom] : NamingPattern.presets
     }
-    /// The live example (or why the template is invalid) for the custom Naming pattern; `nil`
+    /// The live example (or why the pattern is invalid) for the custom Naming pattern; `nil`
     /// when a preset is chosen or before the first render.
     public private(set) var customPreview: CustomNamePreview?
     /// A plain sentence shown near the Download button, or `nil`.
@@ -56,7 +56,7 @@ public final class MainWindowModel {
     }
 
     /// Starts from the saved choices (first-run defaults if none) and saves every change.
-    /// `renderCustomName` previews a custom template (default: the queue's yt-dlp, offline).
+    /// `renderCustomName` previews a custom pattern (default: the queue's yt-dlp, offline).
     /// Download stays disabled until `ytDlpReady` says the launch check has picked a yt-dlp.
     public init(
         queue: Queue, settings: Settings,
@@ -91,7 +91,7 @@ public final class MainWindowModel {
         return { await previewer.preview($0, format: $1) }
     }
 
-    /// Re-renders the custom preview once typing pauses; only the latest template is shown.
+    /// Re-renders the custom preview once typing pauses; only the latest pattern is shown.
     private func refreshCustomPreview() {
         customPreviewTask?.cancel()
         guard options.naming == .custom else {
@@ -99,19 +99,19 @@ public final class MainWindowModel {
             customPreviewTask = nil
             return
         }
-        let template = options.customTemplate
+        let pattern = options.customPattern
         let format = options.format
         let render = renderCustomName
         customPreviewTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(250))
             guard !Task.isCancelled else { return }
-            let preview = await render(template, format)
+            let preview = await render(pattern, format)
             guard !Task.isCancelled, let self else { return }
             self.customPreview = preview
         }
     }
 
-    /// Returns once the custom preview shows the current template.
+    /// Returns once the custom preview shows the current pattern.
     public func waitForCustomPreview() async {
         while let task = customPreviewTask {
             await task.value

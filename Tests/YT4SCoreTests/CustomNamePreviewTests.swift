@@ -62,10 +62,10 @@ struct CustomNamePreviewTests {
         ("%(title)z", "unsupported format character 'z' (0x7a)"),
     ])
     func flagsAnInvalidTemplateWithYtDlpsReason(template: String, reason: String) async throws {
-        #expect(try await preview(template) == .invalid("Invalid template: \(reason)"))
+        #expect(try await preview(template) == .invalid("Invalid pattern: \(reason)"))
     }
 
     @Test func flagsAnEmptyTemplate() async throws {
-        #expect(try await preview("  ") == .invalid("Type a yt-dlp output template, e.g. \(CustomNamingTemplate.starter)"))
+        #expect(try await preview("  ") == .invalid("Type a pattern in yt-dlp's output template language, e.g. \(CustomNamingPattern.starter)"))
     }
 }

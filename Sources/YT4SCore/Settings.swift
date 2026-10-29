@@ -40,18 +40,18 @@ public final class Settings {
                 format: value(Key.format) ?? DownloadOptions.default.format,
                 quality: value(Key.quality) ?? DownloadOptions.default.quality,
                 naming: value(Key.naming) ?? DownloadOptions.default.naming,
-                customTemplate: customPattern
+                customPattern: customPattern
             )
         }
         set {
             defaults.set(newValue.format.rawValue, forKey: Key.format)
             defaults.set(newValue.quality.rawValue, forKey: Key.quality)
             defaults.set(newValue.naming.rawValue, forKey: Key.naming)
-            customPattern = newValue.customTemplate
+            customPattern = newValue.customPattern
         }
     }
 
-    /// Whether the Naming pattern row shows the custom yt-dlp template field.
+    /// Whether the Naming pattern row offers the custom Naming pattern field.
     public var advancedNaming: Bool {
         get { defaults.bool(forKey: Key.advancedNaming) }
         set { defaults.set(newValue, forKey: Key.advancedNaming) }

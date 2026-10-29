@@ -48,8 +48,8 @@ public enum NamingPattern: String, Codable, Sendable, CaseIterable {
     case title
     case channelTitle = "channel-title"
     case dateTitle = "date-title"
-    /// A raw yt-dlp output template (`DownloadOptions.customTemplate`), offered behind the
-    /// advanced toggle. See `CustomNamingTemplate`.
+    /// Written in yt-dlp's output template language (`DownloadOptions.customPattern`), offered
+    /// behind the advanced toggle. See `CustomNamingPattern`.
     case custom
 
     /// The patterns offered without the advanced toggle.
@@ -71,14 +71,15 @@ public struct DownloadOptions: Equatable, Codable, Sendable {
     public var format: Format
     public var quality: QualityPreset
     public var naming: NamingPattern
-    /// The custom Naming pattern text, a yt-dlp output template. Used only when `naming` is `.custom`.
-    public var customTemplate: String
+    /// The custom Naming pattern text, in yt-dlp's output template language. Used only when
+    /// `naming` is `.custom`.
+    public var customPattern: String
 
-    public init(format: Format, quality: QualityPreset, naming: NamingPattern, customTemplate: String = "") {
+    public init(format: Format, quality: QualityPreset, naming: NamingPattern, customPattern: String = "") {
         self.format = format
         self.quality = quality
         self.naming = naming
-        self.customTemplate = customTemplate
+        self.customPattern = customPattern
     }
 
     /// First-run defaults: Video, Best, Title.
@@ -109,7 +110,7 @@ public struct DownloadRequest: Equatable, Sendable {
 public enum DownloadArguments {
     public static func arguments(for request: DownloadRequest) -> [String] {
         machineOutput(request.options)
-            + CustomNamingTemplate.originMetadata(request)
+            + CustomNamingPattern.originMetadata(request)
             + ["--no-playlist"]
             + formatSelection(request.options)
             + ["-P", request.downloadFolder.path, "-o", outputTemplate]

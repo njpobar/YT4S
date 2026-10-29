@@ -133,7 +133,7 @@ private struct FormatRow: View {
 }
 
 /// "File names": the Naming pattern, with an example name in the chosen Format. The Advanced
-/// checkbox adds Custom: a yt-dlp output template field with a live preview under it.
+/// checkbox adds Custom: a custom Naming pattern field with a live preview under it.
 private struct NamingRow: View {
     @Bindable var model: MainWindowModel
 
@@ -153,22 +153,22 @@ private struct NamingRow: View {
                 Toggle("Advanced", isOn: $model.advancedNaming)
                     .toggleStyle(.checkbox)
                     .controlSize(.small)
-                    .help("Offer Custom: write the file name as a yt-dlp output template")
+                    .help("Offer Custom: write the file name pattern in yt-dlp's output template language")
             }
             if model.options.naming == .custom {
-                TextField("Template", text: $model.options.customTemplate, prompt: Text(CustomNamingTemplate.starter))
+                TextField("Custom pattern", text: $model.options.customPattern, prompt: Text(CustomNamingPattern.starter))
                     .font(.system(.body, design: .monospaced))
                     .textFieldStyle(.roundedBorder)
                     .labelsHidden()
                     .autocorrectionDisabled()
-                    .help("A yt-dlp output template, e.g. %(channel)s/%(title)s. A / makes a folder; the extension is added for you.")
+                    .help("yt-dlp's output template language, e.g. %(channel)s/%(title)s. A / makes a folder; the extension is added for you.")
                 CustomPreviewLine(preview: model.customPreview)
             }
         }
     }
 }
 
-/// Under the custom template: the example name, or why the template is invalid.
+/// Under the custom pattern: the example name, or why the pattern is invalid.
 private struct CustomPreviewLine: View {
     let preview: CustomNamePreview?
 

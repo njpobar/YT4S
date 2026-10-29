@@ -14,7 +14,7 @@ import Testing
 
         func render(_ template: String, _ format: Format) async -> CustomNamePreview {
             lock.withLock { _calls.append(template) }
-            return template.contains("bad") ? .invalid("Invalid template: bad") : .example("\(template).\(format.rawValue)")
+            return template.contains("bad") ? .invalid("Invalid pattern: bad") : .example("\(template).\(format.rawValue)")
         }
     }
 
@@ -42,12 +42,12 @@ import Testing
 
         model.advancedNaming = true
         model.options.naming = .custom
-        model.options.customTemplate = "%(uploader)s/%(title)s"
+        model.options.customPattern = "%(uploader)s/%(title)s"
 
         let relaunched = self.model(fake, settings: suite.relaunch())
         #expect(relaunched.advancedNaming)
         #expect(relaunched.options.naming == .custom)
-        #expect(relaunched.options.customTemplate == "%(uploader)s/%(title)s")
+        #expect(relaunched.options.customPattern == "%(uploader)s/%(title)s")
         #expect(suite.defaults.string(forKey: Settings.Key.customPattern) == "%(uploader)s/%(title)s")
     }
 
@@ -57,19 +57,19 @@ import Testing
         let model = model(fake, settings: suite.relaunch())
         model.advancedNaming = true
         model.options.naming = .custom
-        model.options.customTemplate = "%(title)s"
+        model.options.customPattern = "%(title)s"
 
         model.advancedNaming = false
 
         #expect(model.options.naming == .title)
-        #expect(model.options.customTemplate == "%(title)s")
+        #expect(model.options.customPattern == "%(title)s")
         #expect(self.model(fake, settings: suite.relaunch()).options.naming == .title)
     }
 
     @Test func customSavedWithTheToggleOffLoadsAsTitle() throws {
         let suite = TestDefaults()
         let settings = suite.relaunch()
-        settings.options = DownloadOptions(format: .video, quality: .best, naming: .custom, customTemplate: "%(title)s")
+        settings.options = DownloadOptions(format: .video, quality: .best, naming: .custom, customPattern: "%(title)s")
 
         #expect(model(try FakeYtDlp(), settings: suite.relaunch()).options.naming == .title)
     }
@@ -80,7 +80,7 @@ import Testing
 
         model.options.naming = .custom
 
-        #expect(model.options.customTemplate == "%(channel)s/%(title)s")
+        #expect(model.options.customPattern == "%(channel)s/%(title)s")
     }
 
     @Test func thePreviewFollowsTheTemplateAndFormatAsTheyChange() async throws {
@@ -89,8 +89,8 @@ import Testing
         #expect(model.customPreview == nil)
         model.advancedNaming = true
         model.options.naming = .custom
-        model.options.customTemplate = "a"
-        model.options.customTemplate = "ab"
+        model.options.customPattern = "a"
+        model.options.customPattern = "ab"
         await model.waitForCustomPreview()
         #expect(model.customPreview == .example("ab.video"))
 
@@ -98,9 +98,9 @@ import Testing
         await model.waitForCustomPreview()
         #expect(model.customPreview == .example("ab.mp3"))
 
-        model.options.customTemplate = "bad"
+        model.options.customPattern = "bad"
         await model.waitForCustomPreview()
-        #expect(model.customPreview == .invalid("Invalid template: bad"))
+        #expect(model.customPreview == .invalid("Invalid pattern: bad"))
         // Typing quickly renders only what the user paused on.
         #expect(!renderer.calls.contains("a"))
     }
@@ -109,7 +109,7 @@ import Testing
         let model = model(try FakeYtDlp(), settings: TestDefaults().relaunch())
         model.advancedNaming = true
         model.options.naming = .custom
-        model.options.customTemplate = "bad"
+        model.options.customPattern = "bad"
         await model.waitForCustomPreview()
         model.pasteText = "https://youtu.be/dQw4w9WgXcQ"
 
@@ -117,7 +117,7 @@ import Testing
 
         #expect(model.queue.items.isEmpty)
         #expect(model.pasteText == "https://youtu.be/dQw4w9WgXcQ")
-        #expect(model.errorMessage == "Fix the custom file name pattern first. Invalid template: bad")
+        #expect(model.errorMessage == "Fix the custom file name pattern first. Invalid pattern: bad")
     }
 
     @Test func eachQueuedItemKeepsTheTemplateItWasAddedWith() async throws {
@@ -126,14 +126,14 @@ import Testing
         model.chooseDownloadFolder(fake.downloadFolder)
         model.advancedNaming = true
         model.options.naming = .custom
-        model.options.customTemplate = "%(title)s"
+        model.options.customPattern = "%(title)s"
         await model.waitForCustomPreview()
         model.pasteText = "https://youtu.be/dQw4w9WgXcQ"
 
         model.download()
-        model.options.customTemplate = "%(id)s"
+        model.options.customPattern = "%(id)s"
 
-        #expect(model.queue.items.map(\.request.options.customTemplate) == ["%(title)s"])
+        #expect(model.queue.items.map(\.request.options.customPattern) == ["%(title)s"])
         await model.queue.waitUntilIdle()
     }
 }

@@ -84,7 +84,7 @@ struct LiveNamingTests {
             "https://www.youtube.com/playlist?list=PLlaN88a7y2_qHDbY9eQbuNTAuEJUSEeuu",
             DownloadOptions(
                 format: .mp3, quality: .best, naming: .custom,
-                customTemplate: "%(playlist_title)s/%(upload_date>%Y)s/%(playlist_index)03d of %(playlist_count)s: %(id)s.%(ext)s"
+                customPattern: "%(playlist_title)s/%(upload_date>%Y)s/%(playlist_index)03d of %(playlist_count)s: %(id)s.%(ext)s"
             )
         )
 

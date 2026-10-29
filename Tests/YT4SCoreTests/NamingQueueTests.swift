@@ -9,7 +9,7 @@ import Testing
         _ fake: FakeYtDlp,
         id: String = "abc123",
         naming: NamingPattern = .title,
-        customTemplate: String = "",
+        customPattern: String = "",
         format: Format = .video,
         origin: VideoOrigin = .link
     ) async -> QueueItem {
@@ -17,7 +17,7 @@ import Testing
         queue.add(DownloadRequest(
             url: "https://www.youtube.com/watch?v=\(id)",
             downloadFolder: fake.downloadFolder,
-            options: DownloadOptions(format: format, quality: .best, naming: naming, customTemplate: customTemplate),
+            options: DownloadOptions(format: format, quality: .best, naming: naming, customPattern: customPattern),
             origin: origin
         ))
         await queue.waitUntilIdle()
@@ -126,7 +126,7 @@ import Testing
     @Test func aCustomTemplateNamesTheFoldersAndFileAndTheAppForcesTheExtension() async throws {
         let fake = try FakeYtDlp()
 
-        let item = await download(fake, naming: .custom, customTemplate: "%(channel)s/%(upload_date)s/%(title)s.%(ext)s", format: .mp3)
+        let item = await download(fake, naming: .custom, customPattern: "%(channel)s/%(upload_date)s/%(title)s.%(ext)s", format: .mp3)
 
         let file = "Fake Channel/20091025/Fake Video abc123.mp3"
         #expect(item.state == .finished(file: fake.downloadFolder.appendingPathComponent(file)))
@@ -140,7 +140,7 @@ import Testing
             playlistTitle: "Zoo: Trips", playlistIndex: 2, playlistCount: 3
         )
 
-        _ = await download(fake, naming: .custom, customTemplate: "%(title)s", origin: origin)
+        _ = await download(fake, naming: .custom, customPattern: "%(title)s", origin: origin)
 
         #expect(savedFiles(fake) == ["Fake Video abc123.mp4"])
     }
@@ -149,7 +149,7 @@ import Testing
         let fake = try FakeYtDlp()
         try "someone else".write(to: fake.downloadFolder.appendingPathComponent("Fake Video abc123 - x.mp4"), atomically: true, encoding: .utf8)
 
-        let item = await download(fake, naming: .custom, customTemplate: "%(title)s: x")
+        let item = await download(fake, naming: .custom, customPattern: "%(title)s: x")
 
         let file = "Fake Video abc123 - x [abc123].mp4"
         #expect(item.state == .finished(file: fake.downloadFolder.appendingPathComponent(file)))

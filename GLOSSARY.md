@@ -27,6 +27,12 @@ One of a few fixed video quality choices (e.g. Best, 1080p, 720p) offered instea
 The rule that turns a video's details into its saved file name and folder; chosen from presets, or written custom in advanced mode.
 _Avoid_: Naming convention, template
 
+**Custom Naming pattern**:
+A Naming pattern Nick writes himself, behind the advanced toggle, in yt-dlp's output template language (e.g. `%(channel)s/%(title)s`).
+It sets the whole path below the Download folder, replacing the presets' folders and index prefix; YT4S still adds the extension and applies the same name cleanup.
+"Template" names only that language, never the pattern itself.
+_Avoid_: Custom template, output template (for the pattern)
+
 **Queue**:
 The visible list of pending, running, finished, and failed downloads.
 

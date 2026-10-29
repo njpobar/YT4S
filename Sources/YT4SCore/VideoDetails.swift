@@ -10,10 +10,10 @@ extension YtDlpOutputTemplates {
     static let detailsLine = "YT4S-DETAILS\t%(id)s\t%(title)j\t%(channel,uploader)j\t%(upload_date)s"
 
     /// The details line for `options`: with a custom Naming pattern, yt-dlp also renders the
-    /// template as the line's last field (see `CustomNamingTemplate`).
+    /// pattern as the line's last field (see `CustomNamingPattern`).
     static func details(_ options: DownloadOptions) -> String {
         guard options.naming == .custom else { return detailsLine }
-        return detailsLine + "\t" + CustomNamingTemplate(options.customTemplate).printTemplate
+        return detailsLine + "\t" + CustomNamingPattern(options.customPattern).printTemplate
     }
 }
 
@@ -26,7 +26,7 @@ public struct VideoDetails: Equatable, Sendable {
     /// Upload date as yt-dlp gives it, `YYYYMMDD`.
     public var uploadDate: String?
     /// The custom Naming pattern as yt-dlp rendered it for this video (folders separated by
-    /// `CustomNamingTemplate.folderSeparator`), when the pattern is custom.
+    /// `CustomNamingPattern.folderSeparator`), when the pattern is custom.
     public var customName: String?
 
     public init(id: String, title: String, channel: String? = nil, uploadDate: String? = nil, customName: String? = nil) {
