@@ -38,7 +38,8 @@ curl -fsSL https://api.github.com/repos/njpobar/YT4S/releases/latest | grep -o '
 - `Sources/YT4SCore/`: all testable logic, e.g. `Subprocess` and `YtDlpCommand`.
 - `Tests/YT4SCoreTests/`: Swift Testing suites; `Fixtures/fake-yt-dlp` stands in for yt-dlp.
 - `deps.lock`: pinned yt-dlp floor, Deno, ffmpeg and ffprobe (version, SHA-256, URL).
-- `scripts/`: `fetch-deps.sh`, `update-deps.sh`, `build-app.sh`, `make-dmg.sh`, `release.sh`.
+- `scripts/`: `fetch-deps.sh`, `update-deps.sh`, `build-app.sh`, `write-info-plist.sh`, `make-dmg.sh`, `write-appcast.sh`, `release.sh`.
+- `config/sparkle-public-key`: the EdDSA public key app updates are verified against.
 - `VERSION`: the app's semver, the single source of `CFBundleShortVersionString`.
 
 ## Test
@@ -59,6 +60,16 @@ It fetches the binaries pinned in `deps.lock` into `vendor/` (cached, checksum-v
 
 To bump a pinned binary, run `scripts/update-deps.sh <yt-dlp|deno|ffmpeg|ffprobe>`, review the printed line, and paste it into `deps.lock`.
 
+`scripts/write-info-plist.sh` writes the Info.plist: the Sparkle feed (`releases/latest/download/appcast.xml`) and the EdDSA public key from `config/sparkle-public-key`.
+While that file is empty, builds work but cannot update themselves.
+
+The app refuses to run outside `/Applications` (it shows a "Move YT4S to Applications" screen).
+To run a development build from `build/`, pass the override:
+
+```sh
+open build/YT4S.app --args -YT4SAllowAnyLocation YES
+```
+
 ## Release
 
 ```sh
@@ -68,12 +79,40 @@ scripts/release.sh 1.2.3
 
 Run it on a clean `main` that matches `origin/main`, signed in to `gh`.
 The version must be semver and newer than the last `vX.Y.Z` tag.
-It runs `swift test`, the live contract test (still a stub until #32), then `scripts/build-app.sh` (build, sign, post-signing smoke gate), and writes `dist/YT4S-1.2.3.zip` and `dist/YT4S-1.2.3.dmg`.
+It first checks that the Sparkle signing key in your login Keychain matches `config/sparkle-public-key`, so a release can never ship an update installed apps would reject.
+It runs `swift test`, the live contract test (still a stub until #32), then `scripts/build-app.sh` (build, sign, post-signing smoke gate), and writes `dist/YT4S-1.2.3.zip`, `dist/appcast.xml` and `dist/YT4S-1.2.3.dmg`.
+`scripts/write-appcast.sh` EdDSA-signs the zip with Sparkle's `sign_update` (key from the Keychain) and writes a single-entry appcast (no deltas) pointing at the zip on the `v1.2.3` release.
 It then prints the manual checklist (fresh DMG install + Open Anyway; app update from the previous release; yt-dlp update + rollback; playlist and channel runs with Cancel and Retry) and waits for you to type the version.
-Only then does it commit the `VERSION` bump (if `VERSION` differs), tag `v1.2.3`, push `main` and the tag together, and create a **draft** GitHub Release with both files.
-Nothing reaches users until you publish the draft on GitHub.
+Only then does it commit the `VERSION` bump (if `VERSION` differs), tag `v1.2.3`, push `main` and the tag together, and create a **draft** GitHub Release with the zip, `appcast.xml` and the DMG.
+Nothing reaches users until you publish the draft on GitHub: installed apps read `releases/latest/download/appcast.xml`, which only resolves to published releases.
 
 `CFBundleVersion` is the commit count of the tagged commit on `main`, so it only grows; `release.sh` refuses to run if the previous release tag is not an ancestor of `main`.
+
+### Signing key for app updates (one time)
+
+Sparkle verifies every app update against an EdDSA public key baked into the app.
+The private key lives only in Nick's login Keychain; `release.sh` refuses to run without it.
+
+1. Resolve the package once so Sparkle's tools exist: `swift package resolve`.
+2. Create the key in your login Keychain and print its public half (allow the Keychain prompt):
+   `.build/artifacts/sparkle/Sparkle/bin/generate_keys`
+3. Paste the printed public key (the `SUPublicEDKey` value, base64) on its own line at the end of `config/sparkle-public-key`, and commit it.
+   Every build from then on can update itself.
+4. Back up the private key somewhere safe (e.g. a password manager):
+   `.build/artifacts/sparkle/Sparkle/bin/generate_keys -x sparkle-private-key.txt`, store it, then delete the file.
+   If it is lost, installed copies can never update again; Sarah would have to reinstall from a DMG.
+
+On a new Mac, import the backup with `generate_keys -f sparkle-private-key.txt`.
+`generate_keys -p` prints the public key the Keychain holds; it must equal `config/sparkle-public-key`.
+
+### Test an app update locally
+
+To try an update end to end without GitHub, build two versions that trust a throwaway key and read a localhost feed:
+
+1. Make a throwaway key with `openssl genpkey -algorithm ed25519 -outform DER -out k.der`; the last 32 bytes, base64-encoded, are the private key file for `sign_update --ed-key-file`, and `openssl pkey -inform DER -in k.der -pubout -outform DER | tail -c 32 | base64` is the public key.
+2. Build each version with `YT4S_VERSION`, `YT4S_BUILD_NUMBER`, `YT4S_SPARKLE_PUBLIC_KEY=<public key>` and `YT4S_FEED_URL=http://127.0.0.1:8765/appcast.xml` set for `scripts/build-app.sh`.
+3. Zip the newer one with `ditto -c -k --sequesterRsrc --keepParent`, then run `scripts/write-appcast.sh` with `YT4S_SPARKLE_BIN` pointing at a directory whose `sign_update` wraps the real one with `--ed-key-file`.
+4. Serve that directory with `python3 -m http.server 8765 --bind 127.0.0.1`, put the older app in `/Applications`, open it, and click **Update app** once its dot shows.
 
 ## Command Line Tools only (no Xcode)
 

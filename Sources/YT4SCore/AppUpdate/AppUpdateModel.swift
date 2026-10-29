@@ -46,7 +46,7 @@ public enum UpdateButtonHint {
     public var downloadsRunning = false
 
     public var isEnabled: Bool { !downloadsRunning && !isUpdating }
-    public var title: String { isUpdating ? "Updating..." : "Update app" }
+    public var title: String { isUpdating ? "Updating…" : "Update app" }
     /// Why the button is disabled, shown next to it.
     public var hint: String? { downloadsRunning && !isUpdating ? UpdateButtonHint.downloadsRunning : nil }
 

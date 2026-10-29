@@ -49,7 +49,7 @@ import Testing
 
         #expect(engine.installs == 1)
         #expect(model.isEnabled == false)
-        #expect(model.title == "Updating...")
+        #expect(model.title == "Updating…")
         model.updateApp()
         #expect(engine.installs == 1, "a second click while updating does nothing")
     }
