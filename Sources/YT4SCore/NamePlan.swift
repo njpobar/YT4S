@@ -28,9 +28,14 @@ public struct NamePlan: Equatable, Sendable {
 
     /// The plan for a preset: `<stem>` for a single link, `<Channel name>/<stem>` for a Channel
     /// source, `<Playlist title>/<NN> - <stem>` for a Playlist source.
+    /// A custom pattern ignores the Source: its rendered text is the whole path stem.
     public init(pattern: NamingPattern, video: VideoDetails, origin: VideoOrigin) {
+        if pattern == .custom {
+            self.init(customName: video.customName ?? video.title)
+            return
+        }
         let lead: String? = switch pattern {
-        case .title: nil
+        case .title, .custom: nil
         case .channelTitle: video.channel
         case .dateTitle: video.uploadDate.flatMap(Self.isoDate)
         }

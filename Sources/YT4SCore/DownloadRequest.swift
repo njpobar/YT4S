@@ -48,6 +48,12 @@ public enum NamingPattern: String, Codable, Sendable, CaseIterable {
     case title
     case channelTitle = "channel-title"
     case dateTitle = "date-title"
+    /// A raw yt-dlp output template (`DownloadOptions.customTemplate`), offered behind the
+    /// advanced toggle. See `CustomNamingTemplate`.
+    case custom
+
+    /// The patterns offered without the advanced toggle.
+    public static let presets: [NamingPattern] = [.title, .channelTitle, .dateTitle]
 
     /// What the Naming pattern control shows.
     public var label: String {
@@ -55,6 +61,7 @@ public enum NamingPattern: String, Codable, Sendable, CaseIterable {
         case .title: "Title"
         case .channelTitle: "Channel - Title"
         case .dateTitle: "Date - Title"
+        case .custom: "Custom"
         }
     }
 }
@@ -64,11 +71,14 @@ public struct DownloadOptions: Equatable, Codable, Sendable {
     public var format: Format
     public var quality: QualityPreset
     public var naming: NamingPattern
+    /// The custom Naming pattern text, a yt-dlp output template. Used only when `naming` is `.custom`.
+    public var customTemplate: String
 
-    public init(format: Format, quality: QualityPreset, naming: NamingPattern) {
+    public init(format: Format, quality: QualityPreset, naming: NamingPattern, customTemplate: String = "") {
         self.format = format
         self.quality = quality
         self.naming = naming
+        self.customTemplate = customTemplate
     }
 
     /// First-run defaults: Video, Best, Title.
@@ -98,7 +108,8 @@ public struct DownloadRequest: Equatable, Sendable {
 /// them via `YtDlpCommand`, so no caller can forget them.
 public enum DownloadArguments {
     public static func arguments(for request: DownloadRequest) -> [String] {
-        machineOutput
+        machineOutput(request.options)
+            + CustomNamingTemplate.originMetadata(request)
             + ["--no-playlist"]
             + formatSelection(request.options)
             + ["-P", request.downloadFolder.path, "-o", outputTemplate]
@@ -107,13 +118,15 @@ public enum DownloadArguments {
 
     /// Progress and metadata come only from these lines (see `YtDlpOutputTemplates`).
     /// `--print` implies `--quiet`, which hides progress unless `--progress` is given.
-    static let machineOutput = [
-        "--newline", "--progress",
-        "--progress-template", YtDlpOutputTemplates.progress,
-        "--print", YtDlpOutputTemplates.video,
-        "--print", YtDlpOutputTemplates.details,
-        "--print", YtDlpOutputTemplates.file,
-    ]
+    static func machineOutput(_ options: DownloadOptions) -> [String] {
+        [
+            "--newline", "--progress",
+            "--progress-template", YtDlpOutputTemplates.progress,
+            "--print", YtDlpOutputTemplates.video,
+            "--print", "before_dl:" + YtDlpOutputTemplates.details(options),
+            "--print", YtDlpOutputTemplates.file,
+        ]
+    }
 
     /// The yt-dlp flags for a Format / Quality preset. Never adds subtitles, chapters or SponsorBlock.
     static func formatSelection(_ options: DownloadOptions) -> [String] {
