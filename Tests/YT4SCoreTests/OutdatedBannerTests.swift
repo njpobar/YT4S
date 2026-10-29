@@ -48,6 +48,30 @@ import Testing
         #expect(queue.showsOutdatedBanner)
     }
 
+    @Test func aBatchWhereOnlyOneVideoRanCountsAsASingleVideo() async throws {
+        let fake = try FakeYtDlp()
+        let queue = queue(fake, failing: ["bbbbbbbbbbb"])
+        func request(_ id: String) -> DownloadRequest {
+            DownloadRequest(
+                url: "https://www.youtube.com/watch?v=\(id)", downloadFolder: fake.downloadFolder, options: .default,
+                origin: VideoOrigin(sourceKind: .video, videoID: id)
+            )
+        }
+        queue.add(request("aaaaaaaaaaa"))
+        await queue.waitUntilIdle()
+
+        queue.add(request("aaaaaaaaaaa"))
+        queue.add(request("bbbbbbbbbbb"))
+        await queue.waitUntilIdle()
+
+        guard case .alreadyDownloaded = queue.items[1].state else {
+            Issue.record("expected Already downloaded, got \(queue.items[1].state)")
+            return
+        }
+        #expect(queue.items[2].isFailed)
+        #expect(queue.showsOutdatedBanner)
+    }
+
     @Test func otherFailuresNeverShowTheBanner() async throws {
         let fake = try FakeYtDlp()
         let queue = Queue(runner: fake.runner(scenario: "video-failure"))
