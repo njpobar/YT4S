@@ -43,3 +43,16 @@ _Avoid_: Duplicate
 **Download folder**:
 The single folder the user picks in the app where all downloads are saved.
 _Avoid_: Target folder, destination
+
+**Snip**:
+Making a shorter copy of a finished or Already downloaded video, with one or more Cuts removed; offered only from its row in the Queue.
+The original file is never changed, and every Snip starts again from it.
+_Avoid_: Trim, clip, edit
+
+**Cut**:
+One span of a video, at its start, middle or end, marked to be left out of the Snipped copy.
+_Avoid_: Clip, segment, selection
+
+**Snipped copy**:
+The file a Snip produces, saved next to the original as `<original name> (snipped).<ext>`.
+It is the same video in the same Format, so it counts as Already downloaded just as the original does; when both exist, the original is the one a row points to.
