@@ -84,11 +84,34 @@ public final class SnipEditor {
         return plan.keptDuration > 0 ? plan : nil
     }
 
-    /// Where playback at `time` jumps to so it previews the Snipped copy: the end of the Cut
-    /// it is in, or `nil` outside every Cut.
-    public func playbackSkip(at time: Double) -> Double? {
-        cuts.first { $0.start <= time && time < $0.end }?.end
+    /// What playback reaching `time` does so it previews the Snipped copy: skip over the Cut it
+    /// is in, or, in a Cut running to the end of the file, stop just before it (so play can
+    /// start again). `nil` outside every Cut.
+    public func playbackJump(at time: Double) -> PlaybackJump? {
+        guard let cut = cuts.first(where: { $0.start <= time && time < $0.end }) else { return nil }
+        return cut.end >= duration ? .stop(at: max(cut.start - Self.stopMargin, 0)) : .skip(to: cut.end)
     }
+
+    /// Where play pressed at `time` starts: at the end of the preview (nothing kept is left to
+    /// play), the first moment kept; otherwise `nil`, right where it is.
+    public func playbackRestart(at time: Double) -> Double? {
+        let kept = SnipPlan(duration: duration, cuts: cuts).keptSpans
+        guard let first = kept.first, kept.allSatisfy({ $0.end <= time + Self.endSlack }) else { return nil }
+        return first.start
+    }
+
+    /// What playback does at a Cut.
+    public enum PlaybackJump: Equatable, Sendable {
+        /// Plays on from the Cut's end.
+        case skip(to: Double)
+        /// Pauses here, the last moment kept.
+        case stop(at: Double)
+    }
+
+    /// How far before an end Cut playback stops, so the playhead is outside it.
+    private static let stopMargin = 0.001
+    /// How near the last kept moment counts as the end of the preview.
+    private static let endSlack = 0.05
 
     /// The playhead `by` seconds on from `time` (back when negative), within the file.
     public func step(from time: Double, by seconds: Double) -> Double {

@@ -10,7 +10,7 @@ import Testing
     private let input = URL(fileURLWithPath: "/tmp/YT4S/Talk.mp4")
     private let output = URL(fileURLWithPath: "/tmp/YT4S/.yt4s-incomplete/x.mp4")
 
-    @Test func aVideoKeepsBothSidesOfAMiddleCutReEncodedWithItsMetadata() {
+    @Test func aVideoOfUnknownBitrateKeepsBothSidesOfAMiddleCutReEncodedWithItsMetadata() {
         let plan = SnipPlan(duration: 60, cuts: [Cut(start: 10, end: 25)])
 
         #expect(SnipArguments.arguments(input: input, output: output, format: .video, plan: plan) == [
@@ -30,7 +30,7 @@ import Testing
         ])
     }
 
-    @Test func anMP3KeepsItsCoverArtAndTagsAt320K() {
+    @Test func anMP3OfUnknownBitrateKeepsItsCoverArtAndTagsAt320K() {
         let plan = SnipPlan(duration: 60, cuts: [Cut(start: 50, end: 60)])
 
         #expect(SnipArguments.arguments(input: input, output: output, format: .mp3, plan: plan) == [
@@ -84,6 +84,49 @@ import Testing
             "[0:a]atrim=start=10:end=10.03,asetpts=PTS-STARTPTS,afade=t=in:st=0:d=0.015,afade=t=out:st=0.015:d=0.015[a0];"
                 + "[a0]concat=n=1:v=0:a=1[a]"
         ))
+    }
+
+    @Test func aVideoKeepsTheOriginalsBitratesSoTheCopyIsNoBigger() {
+        let plan = SnipPlan(duration: 60, cuts: [Cut(start: 50, end: 60)])
+        let bitrates = SourceBitrates(video: 134_308, audio: 128_094)
+
+        let arguments = SnipArguments.arguments(input: input, output: output, format: .video, plan: plan, bitrates: bitrates)
+
+        #expect(arguments.contains(["-c:v", "h264_videotoolbox", "-b:v", "134308", "-c:a", "aac", "-b:a", "128k"]))
+    }
+
+    @Test(arguments: [
+        (128_094, "128k"),
+        (130_000, "160k"),
+        (245_312, "256k"),
+        (400_000, "320k"),
+        (20_000, "32k"),
+    ])
+    func anMP3KeepsTheNearestStandardBitrateAtOrAboveTheOriginals(audio: Int, bitrate: String) {
+        let plan = SnipPlan(duration: 60, cuts: [Cut(start: 50, end: 60)])
+
+        let arguments = SnipArguments.arguments(input: input, output: output, format: .mp3, plan: plan, bitrates: SourceBitrates(audio: audio))
+
+        #expect(arguments.contains(["-c:a", "libmp3lame", "-b:a", bitrate]))
+    }
+
+    @Test func theOriginalsBitratesAreReadFromFFprobe() throws {
+        let json = """
+        {"streams": [
+            {"codec_type": "audio", "bit_rate": "128094"},
+            {"codec_type": "video", "bit_rate": "9000", "disposition": {"attached_pic": 1}},
+            {"codec_type": "video", "bit_rate": "134308", "disposition": {"attached_pic": 0}}
+        ]}
+        """
+
+        #expect(SourceBitrates(ffprobeJSON: Data(json.utf8)) == SourceBitrates(video: 134_308, audio: 128_094))
+    }
+
+    @Test func bitratesFFprobeDoesNotKnowAreLeftUnknown() {
+        let json = #"{"streams": [{"codec_type": "audio"}, {"codec_type": "video", "bit_rate": "N/A"}]}"#
+
+        #expect(SourceBitrates(ffprobeJSON: Data(json.utf8)) == SourceBitrates())
+        #expect(SourceBitrates(ffprobeJSON: Data("not json".utf8)) == SourceBitrates())
     }
 
     @Test(arguments: [

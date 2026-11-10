@@ -56,8 +56,10 @@ private final class SnipSession: ObservableObject {
     /// Whether the file has a picture, so the arrow keys step its frames.
     private var hasVideo = false
     private var timeObserver: Any?
-    /// One per Cut, at its start: playback reaching it jumps to its end.
+    /// One per Cut, at its start: playback reaching it jumps over it (or stops).
     private var cutObservers: [Any] = []
+    /// Play pressed at the end of the preview starts it again.
+    private var rateObservation: NSKeyValueObservation?
     private var keyMonitor: Any?
     private weak var window: NSWindow?
     private let closeGuard = CloseGuard()
@@ -68,8 +70,12 @@ private final class SnipSession: ObservableObject {
             MainActor.assumeIsolated {
                 self?.currentTime = time.seconds
                 // Play started inside a Cut, or the playhead was dragged into one while playing.
-                self?.skipCut(at: time.seconds)
+                self?.jump(at: time.seconds)
             }
+        }
+        rateObservation = player.observe(\.rate, options: [.old, .new]) { [weak self] _, change in
+            guard change.oldValue == 0, change.newValue != 0 else { return }
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.restartIfAtEnd() } }
         }
         closeGuard.mustAsk = { [weak self] in
             guard let self else { return false }
@@ -84,6 +90,7 @@ private final class SnipSession: ObservableObject {
         timeObserver = nil
         cutObservers.forEach(player.removeTimeObserver)
         cutObservers = []
+        rateObservation = nil
         if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
         keyMonitor = nil
     }
@@ -131,21 +138,28 @@ private final class SnipSession: ObservableObject {
         cutObservers = editor.cuts.map { cut in
             let start = NSValue(time: CMTime(seconds: cut.start, preferredTimescale: 600))
             return player.addBoundaryTimeObserver(forTimes: [start], queue: .main) { [weak self] in
-                MainActor.assumeIsolated { self?.skip(to: cut.end) }
+                // Reported a moment before the start, sometimes: judged at the start itself.
+                MainActor.assumeIsolated { self?.jump(at: cut.start) }
             }
         }
     }
 
-    private func skipCut(at time: Double) {
-        guard let end = editor.playbackSkip(at: time) else { return }
-        skip(to: end)
+    /// Playback at `time`, if it is in a Cut: on from the Cut's end, or stopped just before an
+    /// end Cut.
+    private func jump(at time: Double) {
+        guard player.rate != 0, let jump = editor.playbackJump(at: time) else { return }
+        switch jump {
+        case .skip(let end):
+            seek(to: end)
+        case .stop(let last):
+            player.pause()
+            seek(to: last)
+        }
     }
 
-    /// Playback over a Cut: on from its end, or stopped at the end of the file.
-    private func skip(to end: Double) {
-        guard player.rate != 0 else { return }
-        if end >= editor.duration { player.pause() }
-        seek(to: end)
+    private func restartIfAtEnd() {
+        guard player.rate != 0, let start = editor.playbackRestart(at: player.currentTime().seconds) else { return }
+        seek(to: start)
     }
 
     /// Whether the window's key was one of the editor's.
@@ -187,8 +201,6 @@ private final class CloseGuard: NSObject, NSWindowDelegate {
     var mustAsk: () -> Bool = { false }
     /// Read by the runtime off the main actor when it asks what the delegate implements; set once, on the main actor.
     nonisolated(unsafe) private weak var forwarded: NSWindowDelegate?
-    /// Discard was chosen: the next close goes through.
-    private var discarded = false
 
     func install(on window: NSWindow) {
         guard window.delegate !== self else { return }
@@ -205,7 +217,7 @@ private final class CloseGuard: NSObject, NSWindowDelegate {
     }
 
     func windowShouldClose(_ window: NSWindow) -> Bool {
-        guard discarded || !mustAsk() else {
+        guard !mustAsk() else {
             ask(in: window)
             return false
         }
@@ -219,13 +231,12 @@ private final class CloseGuard: NSObject, NSWindowDelegate {
         alert.informativeText = "The Cuts you marked are not saved."
         alert.addButton(withTitle: "Discard").hasDestructiveAction = true
         alert.addButton(withTitle: "Cancel")
-        alert.beginSheetModal(for: window) { [weak self, weak window] response in
+        alert.beginSheetModal(for: window) { [weak window] response in
             MainActor.assumeIsolated {
-                guard response == .alertFirstButtonReturn, let self, let window else { return }
-                self.discarded = true
-                window.performClose(nil)
-                // Still open (SwiftUI's delegate refused): the next close asks again.
-                self.discarded = false
+                guard response == .alertFirstButtonReturn, let window else { return }
+                // Closes without asking again; after the sheet is fully gone, as a window with a
+                // sheet does not close.
+                DispatchQueue.main.async { window.close() }
             }
         }
     }

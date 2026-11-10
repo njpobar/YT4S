@@ -22,11 +22,14 @@ public enum SnipUpdate: Equatable, Sendable {
 /// the original, so it counts as Already downloaded. The original is only ever read.
 public struct Snipper: Sendable {
     public var ffmpeg: URL
+    /// Reads the original's bitrates, so the copy keeps them.
+    public var ffprobe: URL
     /// `nil` inherits the app's environment.
     public var environment: [String: String]?
 
     public init(tools: BundledTools, environment: [String: String]? = nil) {
         ffmpeg = tools.ffmpegDirectory.appendingPathComponent("ffmpeg")
+        ffprobe = tools.ffmpegDirectory.appendingPathComponent("ffprobe")
         self.environment = environment
     }
 
@@ -34,6 +37,7 @@ public struct Snipper: Sendable {
     /// `SnipFailure` with nothing left behind. Cancelling the consumer stops ffmpeg.
     public func snip(_ original: URL, video: SavedVideo, plan: SnipPlan, in folder: DownloadFolder) -> AsyncThrowingStream<SnipUpdate, Error> {
         let ffmpeg = ffmpeg
+        let ffprobe = ffprobe
         let environment = environment
         return AsyncThrowingStream { continuation in
             let task = Task {
@@ -45,9 +49,10 @@ public struct Snipper: Sendable {
                 do {
                     try FileManager.default.createDirectory(at: workFolder, withIntermediateDirectories: true)
                     let keptDuration = plan.keptDuration
+                    let bitrates = await Self.bitrates(of: original, ffprobe: ffprobe, environment: environment)
                     let result = try await Subprocess.run(
                         executable: ffmpeg,
-                        arguments: SnipArguments.arguments(input: original, output: partial, format: video.format, plan: plan),
+                        arguments: SnipArguments.arguments(input: original, output: partial, format: video.format, plan: plan, bitrates: bitrates),
                         environment: environment,
                         onStdoutLine: { line in
                             if let fraction = SnipArguments.fraction(ofProgressLine: line, keptDuration: keptDuration) {
@@ -78,5 +83,16 @@ public struct Snipper: Sendable {
             }
             continuation.onTermination = { _ in task.cancel() }
         }
+    }
+
+    /// The original's bitrates, or unknown ones if ffprobe cannot tell (the copy then gets a
+    /// high quality instead).
+    private static func bitrates(of original: URL, ffprobe: URL, environment: [String: String]?) async -> SourceBitrates {
+        guard let result = try? await Subprocess.run(
+            executable: ffprobe,
+            arguments: ["-v", "error", "-of", "json", "-show_streams", original.path],
+            environment: environment
+        ), result.termination == .exited(0) else { return SourceBitrates() }
+        return SourceBitrates(ffprobeJSON: Data(result.stdout.utf8))
     }
 }

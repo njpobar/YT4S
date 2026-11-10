@@ -184,18 +184,40 @@ import Testing
         cut(editor, 0, 5)
         cut(editor, 20, 30)
 
-        #expect(editor.playbackSkip(at: 0) == 5)
-        #expect(editor.playbackSkip(at: 20) == 30)
-        #expect(editor.playbackSkip(at: 29.9) == 30)
-        #expect(editor.playbackSkip(at: 30) == nil)
-        #expect(editor.playbackSkip(at: 10) == nil)
+        #expect(editor.playbackJump(at: 0) == .skip(to: 5))
+        #expect(editor.playbackJump(at: 20) == .skip(to: 30))
+        #expect(editor.playbackJump(at: 29.9) == .skip(to: 30))
+        #expect(editor.playbackJump(at: 30) == nil)
+        #expect(editor.playbackJump(at: 10) == nil)
     }
 
-    @Test func playbackReachingACutAtTheEndJumpsToTheEndOfTheFile() {
+    @Test func playbackReachingACutAtTheEndStopsJustBeforeIt() {
         let editor = editor()
         cut(editor, 50, 60)
 
-        #expect(editor.playbackSkip(at: 55) == 60)
+        #expect(editor.playbackJump(at: 50) == .stop(at: 49.999))
+        #expect(editor.playbackJump(at: 55) == .stop(at: 49.999))
+    }
+
+    @Test func playFromTheEndOfThePreviewStartsAgainFromTheFirstKeptMoment() {
+        let editor = editor()
+        cut(editor, 0, 5)
+        cut(editor, 50, 60)
+
+        #expect(editor.playbackRestart(at: 49.999) == 5)
+        #expect(editor.playbackRestart(at: 55) == 5)
+        #expect(editor.playbackRestart(at: 60) == 5)
+        #expect(editor.playbackRestart(at: 49) == nil)
+        #expect(editor.playbackRestart(at: 2) == nil)
+    }
+
+    @Test func playFromTheEndOfAFileWithoutAnEndCutStartsAgainFromTheStart() {
+        let editor = editor()
+        cut(editor, 20, 30)
+
+        #expect(editor.playbackRestart(at: 60) == 0)
+        #expect(editor.playbackRestart(at: 59.99) == 0)
+        #expect(editor.playbackRestart(at: 40) == nil)
     }
 
     @Test func arrowKeysStepThePlayheadWithinTheFile() {

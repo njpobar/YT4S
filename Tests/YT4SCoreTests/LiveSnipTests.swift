@@ -42,10 +42,11 @@ struct LiveSnipTests {
         #expect(probe.tags["title"] == "Talk", "\(probe)")
         #expect(probe.tags["artist"] == "Channel", "\(probe)")
         #expect(probe.tags["date"] == "20050424", "\(probe)")
+        try await sandbox.expectKeptBitrates(of: original, in: copy)
         try await sandbox.expectFadedJoin(in: copy, at: 1)
     }
 
-    @Test func anMP3IsReEncodedAt320KAndKeepsItsTagsAndCoverArt() async throws {
+    @Test func anMP3IsReEncodedAtItsOwnBitrateAndKeepsItsTagsAndCoverArt() async throws {
         let sandbox = try Sandbox()
         let cover = sandbox.folder.appendingPathComponent("cover.jpg")
         let original = sandbox.folder.appendingPathComponent("Song.mp3")
@@ -70,10 +71,11 @@ struct LiveSnipTests {
         let probe = try await sandbox.probe(copy)
         #expect(probe.formatName == "mp3", "\(probe)")
         #expect(abs(probe.duration - 3) < 0.05, "\(probe)")
-        #expect(probe.streams.contains { $0.codec == "mp3" && $0.bitRate == 320_000 }, "\(probe)")
+        #expect(probe.streams.contains { $0.codec == "mp3" && $0.bitRate == 128_000 }, "\(probe)")
         #expect(probe.streams.contains { $0.codec == "mjpeg" && $0.attachedPicture }, "\(probe)")
         #expect(probe.tags["title"] == "Song", "\(probe)")
         #expect(probe.tags["artist"] == "Band", "\(probe)")
+        try await sandbox.expectKeptBitrates(of: original, in: copy)
         try await sandbox.expectFadedJoin(in: copy, at: 1)
     }
 
@@ -113,6 +115,21 @@ struct LiveSnipTests {
             #expect(!fractions.isEmpty)
             #expect(fractions == fractions.sorted())
             return try #require(saved)
+        }
+
+        /// The copy is encoded at about the original's bitrates, so with half the file cut it is
+        /// clearly smaller than the original, never bigger.
+        func expectKeptBitrates(of original: URL, in copy: URL) async throws {
+            let originalProbe = try await probe(original)
+            let copyProbe = try await probe(copy)
+            for (before, after) in zip(originalProbe.streams, copyProbe.streams) where !before.attachedPicture {
+                let ratio = Double(after.bitRate ?? 0) / Double(before.bitRate ?? 1)
+                #expect(ratio < 1.3, "\(after.codec) at \(after.bitRate ?? 0) b/s vs the original's \(before.bitRate ?? 0)")
+            }
+            let size = { (file: URL) in try FileManager.default.attributesOfItem(atPath: file.path)[.size] as? Int ?? 0 }
+            let copySize = try size(copy)
+            let originalSize = try size(original)
+            #expect(copySize < originalSize * 7 / 10, "\(copySize) bytes vs the original's \(originalSize)")
         }
 
         /// The audio around a join at `time` (seconds into the copy) is near silent where the
