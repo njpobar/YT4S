@@ -5,8 +5,13 @@ import Foundation
 /// Every kept span is trimmed out of the original and the spans are joined, so Cuts are
 /// frame-exact; that needs a re-encode: video with the hardware `h264_videotoolbox` at a high
 /// constant quality (same resolution), MP3 at 320K. Metadata is copied from the original, and an
-/// MP3's cover art (its attached picture) is copied as is.
+/// MP3's cover art (its attached picture) is copied as is. The audio fades over `joinFade`
+/// seconds on each side of every Cut (out before it, in after it), so no join clicks, nor a
+/// copy that now starts or stops mid-sound; the original file's own start and end are left as is.
 public enum SnipArguments {
+    /// The audio fade on each side of a join, in seconds.
+    public static let joinFade = 0.02
+
     public static func arguments(input: URL, output: URL, format: Format, plan: SnipPlan) -> [String] {
         let spans = plan.keptSpans
         var filters: [String] = []
@@ -18,7 +23,12 @@ public enum SnipArguments {
                 filters.append("[0:v]trim=\(range),setpts=PTS-STARTPTS[v\(index)]")
                 joined += "[v\(index)]"
             }
-            filters.append("[0:a]atrim=\(range),asetpts=PTS-STARTPTS[a\(index)]")
+            // Shorter than two fades: each gets half the span.
+            let fade = min(joinFade, span.length / 2)
+            var audio = "[0:a]atrim=\(range),asetpts=PTS-STARTPTS"
+            if span.start > 0 { audio += ",afade=t=in:st=0:d=\(seconds(fade))" }
+            if span.end < plan.duration { audio += ",afade=t=out:st=\(seconds(span.length - fade)):d=\(seconds(fade))" }
+            filters.append(audio + "[a\(index)]")
             joined += "[a\(index)]"
         }
         let common = [

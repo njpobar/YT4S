@@ -12,6 +12,19 @@ public struct Cut: Equatable, Sendable {
     }
 
     public var length: Double { end - start }
+
+    /// `cuts` in order, with every overlapping or touching pair made one.
+    public static func merged(_ cuts: [Cut]) -> [Cut] {
+        var merged: [Cut] = []
+        for cut in cuts.sorted(by: { $0.start < $1.start }) {
+            if let last = merged.last, cut.start <= last.end {
+                merged[merged.count - 1] = Cut(start: last.start, end: max(last.end, cut.end))
+            } else {
+                merged.append(cut)
+            }
+        }
+        return merged
+    }
 }
 
 /// A span of the original the Snipped copy keeps, in seconds.

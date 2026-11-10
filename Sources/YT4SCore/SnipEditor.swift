@@ -4,8 +4,8 @@ import Observation
 /// State behind the Snip window's timeline, in seconds of the original.
 ///
 /// The user drags across the timeline to select a span (`select`), adjusts its two edge handles
-/// (`moveSelectionStart` / `moveSelectionEnd`), and presses Cut (`cutSelection`). One Cut per
-/// Snip: a new Cut replaces the old one. Save Snipped copy takes `plan`.
+/// (`moveSelectionStart` / `moveSelectionEnd`), and presses Cut (`cutSelection`). Any number of
+/// Cuts; overlapping or touching ones merge. Save Snipped copy takes `plan`.
 @MainActor @Observable
 public final class SnipEditor {
     /// The original's length; 0 until the player has loaded it, and nothing can be selected.
@@ -14,7 +14,10 @@ public final class SnipEditor {
     }
     /// The span being marked, before it is Cut.
     public private(set) var selection: Cut?
-    public private(set) var cut: Cut?
+    /// In order, never overlapping or touching.
+    public private(set) var cuts: [Cut] = []
+    /// The Cut last clicked on the timeline, which shows a small x to remove it.
+    public private(set) var pickedCut: Cut?
 
     public init() {}
 
@@ -22,6 +25,7 @@ public final class SnipEditor {
     public func select(from start: Double, to end: Double) {
         guard duration > 0 else { return }
         selection = clamped(Cut(start: start, end: end))
+        pickedCut = nil
     }
 
     /// The selection's start handle; it stops at the end handle.
@@ -36,21 +40,59 @@ public final class SnipEditor {
         self.selection = Cut(start: selection.start, end: max(min(time, duration), selection.start))
     }
 
-    public var canCut: Bool { (selection?.length ?? 0) > 0 }
-
-    /// Cut: the selection becomes the Cut (replacing any earlier one) and is cleared.
-    public func cutSelection() {
-        guard canCut else { return }
-        cut = selection
-        selection = nil
+    /// The set-start shortcut at the playhead: the selection now starts at `time`. Without a
+    /// selection, or when `time` is past its end, the span runs on to the end of the file.
+    public func setSelectionStart(at time: Double) {
+        let end = selection.map(\.end).flatMap { $0 >= time ? $0 : nil } ?? duration
+        select(from: time, to: end)
     }
 
-    /// What Save Snipped copy saves: `nil` (Save disabled) until there is a Cut that leaves
-    /// something to keep.
+    /// The set-end shortcut at the playhead: the selection now ends at `time`. Without a
+    /// selection, or when `time` is before its start, the span runs from the start of the file.
+    public func setSelectionEnd(at time: Double) {
+        let start = selection.map(\.start).flatMap { $0 <= time ? $0 : nil } ?? 0
+        select(from: start, to: time)
+    }
+
+    public var canCut: Bool { (selection?.length ?? 0) > 0 }
+
+    /// Cut: the selection becomes a Cut (merged with any it overlaps or touches) and is cleared.
+    public func cutSelection() {
+        guard canCut, let selection else { return }
+        cuts = Cut.merged(cuts + [selection])
+        self.selection = nil
+        pickedCut = nil
+    }
+
+    /// A click on the timeline at `time`: picks the Cut there, or none.
+    public func pickCut(at time: Double) {
+        pickedCut = cuts.first { $0.start <= time && time <= $0.end }
+    }
+
+    /// The picked Cut's x: the Cut is gone, and its span is kept again.
+    public func removePickedCut() {
+        guard let pickedCut else { return }
+        cuts.removeAll { $0 == pickedCut }
+        self.pickedCut = nil
+    }
+
+    /// What Save Snipped copy saves: `nil` (Save disabled) while there are no Cuts, or they
+    /// leave nothing to keep.
     public var plan: SnipPlan? {
-        guard let cut else { return nil }
-        let plan = SnipPlan(duration: duration, cuts: [cut])
+        guard !cuts.isEmpty else { return nil }
+        let plan = SnipPlan(duration: duration, cuts: cuts)
         return plan.keptDuration > 0 ? plan : nil
+    }
+
+    /// Where playback at `time` jumps to so it previews the Snipped copy: the end of the Cut
+    /// it is in, or `nil` outside every Cut.
+    public func playbackSkip(at time: Double) -> Double? {
+        cuts.first { $0.start <= time && time < $0.end }?.end
+    }
+
+    /// The playhead `by` seconds on from `time` (back when negative), within the file.
+    public func step(from time: Double, by seconds: Double) -> Double {
+        min(max(time + seconds, 0), duration)
     }
 
     /// One of the selection's two edge handles.
@@ -66,6 +108,21 @@ public final class SnipEditor {
         let toEnd = abs(time - selection.end)
         guard min(toStart, toEnd) <= reach else { return nil }
         return toEnd < toStart ? .end : .start
+    }
+
+    /// The line under the timeline: the selection being marked, the picked Cut, the Cuts, or
+    /// how to start.
+    public var status: String {
+        if let selection {
+            return "Selected \(Self.timeText(selection.start)) - \(Self.timeText(selection.end)). Press Cut to leave it out."
+        }
+        if let pickedCut {
+            return "Cut \(Self.timeText(pickedCut.start)) - \(Self.timeText(pickedCut.end)) (\(Self.timeText(pickedCut.length))). Click x to keep it."
+        }
+        guard !cuts.isEmpty else { return "Drag across the timeline to select the part to cut." }
+        let count = cuts.count == 1 ? "1 Cut" : "\(cuts.count) Cuts"
+        guard let plan else { return "\(count) over the whole file. Remove one to keep something." }
+        return "\(count). The Snipped copy runs \(Self.timeText(plan.keptDuration))."
     }
 
     /// `1:05.3`: minutes, seconds and tenths, for span edges and lengths.

@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import YT4SCore
 
-/// Which parts of the file a Snipped copy keeps once its Cut is left out.
+/// Which parts of the file a Snipped copy keeps once its Cuts are left out.
 @Suite struct SnipPlanTests {
     private func kept(_ cut: Cut, duration: Double = 60) -> [KeptSpan] {
         SnipPlan(duration: duration, cuts: [cut]).keptSpans
@@ -38,5 +38,45 @@ import Testing
 
     @Test func aCutIsTheSameWhicheverEdgeWasDraggedFirst() {
         #expect(Cut(start: 25, end: 10) == Cut(start: 10, end: 25))
+    }
+
+    @Test func aStartMiddleAndEndCutKeepTheTwoSpansBetweenThem() {
+        let plan = SnipPlan(duration: 60, cuts: [Cut(start: 50, end: 60), Cut(start: 0, end: 5), Cut(start: 20, end: 30)])
+
+        #expect(plan.keptSpans == [KeptSpan(start: 5, end: 20), KeptSpan(start: 30, end: 50)])
+        #expect(plan.keptDuration == 35)
+    }
+
+    @Test func overlappingCutsKeepWhatNeitherCovers() {
+        let plan = SnipPlan(duration: 60, cuts: [Cut(start: 10, end: 30), Cut(start: 20, end: 25), Cut(start: 28, end: 40)])
+
+        #expect(plan.keptSpans == [KeptSpan(start: 0, end: 10), KeptSpan(start: 40, end: 60)])
+    }
+
+    @Test func cutsTogetherCoveringTheWholeFileKeepNothing() {
+        #expect(SnipPlan(duration: 60, cuts: [Cut(start: 0, end: 30), Cut(start: 30, end: 60)]).keptSpans.isEmpty)
+    }
+}
+
+/// Cuts marked on the timeline become one where they overlap or touch.
+@Suite struct CutMergingTests {
+    @Test func separateCutsStaySeparateInOrder() {
+        #expect(Cut.merged([Cut(start: 40, end: 50), Cut(start: 0, end: 5)]) == [Cut(start: 0, end: 5), Cut(start: 40, end: 50)])
+    }
+
+    @Test func overlappingCutsMerge() {
+        #expect(Cut.merged([Cut(start: 10, end: 20), Cut(start: 15, end: 30)]) == [Cut(start: 10, end: 30)])
+    }
+
+    @Test func touchingCutsMerge() {
+        #expect(Cut.merged([Cut(start: 30, end: 35), Cut(start: 10, end: 30)]) == [Cut(start: 10, end: 35)])
+    }
+
+    @Test func aCutInsideAnotherDisappearsIntoIt() {
+        #expect(Cut.merged([Cut(start: 5, end: 25), Cut(start: 10, end: 12)]) == [Cut(start: 5, end: 25)])
+    }
+
+    @Test func noCutsMergeToNone() {
+        #expect(Cut.merged([]).isEmpty)
     }
 }

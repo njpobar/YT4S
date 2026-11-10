@@ -4,7 +4,7 @@ import YT4SCore
 
 /// The Snip window of one Done Queue row: a large player, the timeline under it, then Cut and
 /// Save Snipped copy. One window per row (opening it again brings it forward); the main window
-/// keeps working behind it. Save hands the Cut to the Queue and closes the window; the row shows
+/// keeps working behind it. Save hands the Cuts to the Queue and closes the window; the row shows
 /// the progress.
 struct SnipWindow: View {
     static let id = "snip"
@@ -37,6 +37,10 @@ struct SnipWindow: View {
 /// The window's own state: the timeline model and the player, kept for the window's lifetime.
 /// An `ObservableObject` held by `@StateObject`: `@State` is a SwiftUI macro whose plugin ships
 /// only with Xcode, and this project builds with Command Line Tools (see `YT4SApp`).
+///
+/// Playback skips every Cut, so play previews the Snipped copy. The window's keys: Left / Right
+/// step a frame (an MP3 a tenth of a second; with Shift, a second), I and O set the selection's
+/// start and end at the playhead, Delete removes the picked Cut.
 @MainActor
 private final class SnipSession: ObservableObject {
     let editor = SnipEditor()
@@ -47,20 +51,41 @@ private final class SnipSession: ObservableObject {
     @Published var artwork: NSImage?
     /// What the drag in progress on the timeline does, from where it started.
     var timelineDrag: TimelineDrag?
+    /// Set by Save: the Cuts went to the Queue, so closing asks nothing.
+    var saved = false
+    /// Whether the file has a picture, so the arrow keys step its frames.
+    private var hasVideo = false
     private var timeObserver: Any?
+    /// One per Cut, at its start: playback reaching it jumps to its end.
+    private var cutObservers: [Any] = []
+    private var keyMonitor: Any?
+    private weak var window: NSWindow?
+    private let closeGuard = CloseGuard()
 
     init(file: URL) {
         player = AVPlayer(url: file)
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 30), queue: .main) { [weak self] time in
-            MainActor.assumeIsolated { self?.currentTime = time.seconds }
+            MainActor.assumeIsolated {
+                self?.currentTime = time.seconds
+                // Play started inside a Cut, or the playhead was dragged into one while playing.
+                self?.skipCut(at: time.seconds)
+            }
+        }
+        closeGuard.mustAsk = { [weak self] in
+            guard let self else { return false }
+            return !self.saved && !self.editor.cuts.isEmpty
         }
     }
 
-    /// The window closed (or saved): stop playing and following the playhead.
+    /// The window closed (or saved): stop playing, following the playhead and taking keys.
     func stop() {
         player.pause()
         if let timeObserver { player.removeTimeObserver(timeObserver) }
         timeObserver = nil
+        cutObservers.forEach(player.removeTimeObserver)
+        cutObservers = []
+        if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
+        keyMonitor = nil
     }
 
     /// The duration for the timeline, and an MP3's cover art for the player.
@@ -69,7 +94,8 @@ private final class SnipSession: ObservableObject {
         if let duration = try? await asset.load(.duration), duration.isNumeric {
             editor.duration = duration.seconds
         }
-        guard (try? await asset.loadTracks(withMediaType: .video))?.isEmpty ?? true,
+        hasVideo = !((try? await asset.loadTracks(withMediaType: .video))?.isEmpty ?? true)
+        guard !hasVideo,
               let metadata = try? await asset.load(.commonMetadata),
               let item = AVMetadataItem.metadataItems(from: metadata, filteredByIdentifier: .commonIdentifierArtwork).first,
               let data = try? await item.load(.dataValue) else { return }
@@ -80,6 +106,153 @@ private final class SnipSession: ObservableObject {
     func seek(to seconds: Double) {
         currentTime = seconds
         player.seek(to: CMTime(seconds: seconds, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+    }
+
+    /// The window the editor shows in: its keys come here, and closing it with Cuts asks first.
+    func attach(to window: NSWindow) {
+        closeGuard.install(on: window)
+        guard self.window !== window else { return }
+        self.window = window
+        if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            // Local monitors run on the main thread.
+            nonisolated(unsafe) let event = event
+            let handled = MainActor.assumeIsolated {
+                guard let self, event.window === self.window else { return false }
+                return self.handleKey(event)
+            }
+            return handled ? nil : event
+        }
+    }
+
+    /// The Cuts changed: playback now skips these.
+    func cutsChanged() {
+        cutObservers.forEach(player.removeTimeObserver)
+        cutObservers = editor.cuts.map { cut in
+            let start = NSValue(time: CMTime(seconds: cut.start, preferredTimescale: 600))
+            return player.addBoundaryTimeObserver(forTimes: [start], queue: .main) { [weak self] in
+                MainActor.assumeIsolated { self?.skip(to: cut.end) }
+            }
+        }
+    }
+
+    private func skipCut(at time: Double) {
+        guard let end = editor.playbackSkip(at: time) else { return }
+        skip(to: end)
+    }
+
+    /// Playback over a Cut: on from its end, or stopped at the end of the file.
+    private func skip(to end: Double) {
+        guard player.rate != 0 else { return }
+        if end >= editor.duration { player.pause() }
+        seek(to: end)
+    }
+
+    /// Whether the window's key was one of the editor's.
+    private func handleKey(_ event: NSEvent) -> Bool {
+        guard editor.duration > 0, event.modifierFlags.isDisjoint(with: [.command, .control, .option]) else { return false }
+        switch event.specialKey {
+        case .leftArrow?: step(-1, bySecond: event.modifierFlags.contains(.shift)); return true
+        case .rightArrow?: step(1, bySecond: event.modifierFlags.contains(.shift)); return true
+        case .delete?, .deleteForward?:
+            guard editor.pickedCut != nil else { return false }
+            editor.removePickedCut()
+            return true
+        default: break
+        }
+        switch event.charactersIgnoringModifiers?.lowercased() {
+        case "i": editor.setSelectionStart(at: currentTime); return true
+        case "o": editor.setSelectionEnd(at: currentTime); return true
+        default: return false
+        }
+    }
+
+    /// One frame (an MP3 a tenth of a second), or one second, either way; stepping pauses.
+    private func step(_ direction: Int, bySecond: Bool) {
+        player.pause()
+        if hasVideo && !bySecond {
+            player.currentItem?.step(byCount: direction)
+            // The playhead line and I / O read this; the time observer may not fire while paused.
+            currentTime = player.currentTime().seconds
+        } else {
+            seek(to: editor.step(from: currentTime, by: Double(direction) * (bySecond ? 1 : 0.1)))
+        }
+    }
+}
+
+/// Stands in as its window's delegate to ask "Discard Cuts?" before the window closes with
+/// Cuts not saved; everything else goes on to SwiftUI's own delegate.
+@MainActor
+private final class CloseGuard: NSObject, NSWindowDelegate {
+    var mustAsk: () -> Bool = { false }
+    /// Read by the runtime off the main actor when it asks what the delegate implements; set once, on the main actor.
+    nonisolated(unsafe) private weak var forwarded: NSWindowDelegate?
+    /// Discard was chosen: the next close goes through.
+    private var discarded = false
+
+    func install(on window: NSWindow) {
+        guard window.delegate !== self else { return }
+        forwarded = window.delegate
+        window.delegate = self
+    }
+
+    override func responds(to selector: Selector!) -> Bool {
+        super.responds(to: selector) || (forwarded?.responds(to: selector) ?? false)
+    }
+
+    override func forwardingTarget(for selector: Selector!) -> Any? {
+        forwarded?.responds(to: selector) == true ? forwarded : nil
+    }
+
+    func windowShouldClose(_ window: NSWindow) -> Bool {
+        guard discarded || !mustAsk() else {
+            ask(in: window)
+            return false
+        }
+        return forwarded?.windowShouldClose?(window) ?? true
+    }
+
+    private func ask(in window: NSWindow) {
+        guard window.attachedSheet == nil else { return }
+        let alert = NSAlert()
+        alert.messageText = "Discard Cuts?"
+        alert.informativeText = "The Cuts you marked are not saved."
+        alert.addButton(withTitle: "Discard").hasDestructiveAction = true
+        alert.addButton(withTitle: "Cancel")
+        alert.beginSheetModal(for: window) { [weak self, weak window] response in
+            MainActor.assumeIsolated {
+                guard response == .alertFirstButtonReturn, let self, let window else { return }
+                self.discarded = true
+                window.performClose(nil)
+                // Still open (SwiftUI's delegate refused): the next close asks again.
+                self.discarded = false
+            }
+        }
+    }
+}
+
+/// Reports the window it is in, once it is in one.
+private struct WindowReader: NSViewRepresentable {
+    let onWindow: (NSWindow) -> Void
+
+    func makeNSView(context: Context) -> ReaderView {
+        let view = ReaderView()
+        view.onWindow = onWindow
+        return view
+    }
+
+    func updateNSView(_ view: ReaderView, context: Context) {
+        view.onWindow = onWindow
+        if let window = view.window { onWindow(window) }
+    }
+
+    final class ReaderView: NSView {
+        var onWindow: ((NSWindow) -> Void)?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if let window { onWindow?(window) }
+        }
     }
 }
 
@@ -110,11 +283,16 @@ private struct SnipEditorView: View {
                 .frame(height: 40)
 
             HStack(spacing: 10) {
-                Text(spanText)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-                    .lineLimit(1)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(editor.status)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    Text("← → step  ·  I / O set start / end at the playhead  ·  Delete removes the picked Cut")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+                .monospacedDigit()
+                .lineLimit(1)
                 Spacer(minLength: 12)
                 Button("Cut") { editor.cutSelection() }
                     .disabled(!editor.canCut)
@@ -127,32 +305,25 @@ private struct SnipEditorView: View {
         }
         .padding(16)
         .frame(minWidth: 560, minHeight: 420)
+        .background(WindowReader { session.attach(to: $0) })
         .task { await session.load(file) }
+        .onChange(of: editor.cuts) { session.cutsChanged() }
         .onDisappear { session.stop() }
-    }
-
-    /// What the timeline holds, in words: the selection being marked, or the Cut, or how to start.
-    private var spanText: String {
-        if let selection = editor.selection {
-            return "Selected \(SnipEditor.timeText(selection.start)) - \(SnipEditor.timeText(selection.end)). Press Cut to leave it out."
-        }
-        if let cut = editor.cut {
-            return "Cut \(SnipEditor.timeText(cut.start)) - \(SnipEditor.timeText(cut.end)) (\(SnipEditor.timeText(cut.length)))"
-        }
-        return "Drag across the timeline to select the part to cut."
     }
 
     private func save() {
         guard let plan = editor.plan else { return }
+        session.saved = true
         session.stop()
         queue.snip(itemID, plan: plan)
         dismiss()
     }
 }
 
-/// The timeline under the player: the Cut in striped grey, the selection with its two edge
+/// The timeline under the player: the Cuts in striped grey, the selection with its two edge
 /// handles, and the playhead. Dragging across empty track selects a span; dragging a handle moves
-/// that edge; a click moves the playhead. The picture follows every drag.
+/// that edge; a click moves the playhead, and on a Cut picks it, showing an x that removes it.
+/// The picture follows every drag.
 private struct SnipTimeline: View {
     let session: SnipSession
     let currentTime: Double
@@ -169,8 +340,8 @@ private struct SnipTimeline: View {
             ZStack(alignment: .leading) {
                 RoundedRectangle(cornerRadius: 5)
                     .fill(Color(nsColor: .quaternaryLabelColor))
-                if let cut = editor.cut {
-                    StripedSpan()
+                ForEach(editor.cuts, id: \.start) { cut in
+                    StripedSpan(picked: cut == editor.pickedCut)
                         .frame(width: max(x(cut.end, width) - x(cut.start, width), 1))
                         .offset(x: x(cut.start, width))
                 }
@@ -189,7 +360,25 @@ private struct SnipTimeline: View {
             .clipShape(RoundedRectangle(cornerRadius: 5))
             .contentShape(Rectangle())
             .gesture(gesture(width: width))
+            .overlay {
+                if let cut = editor.pickedCut {
+                    removeButton
+                        .position(x: min(max((x(cut.start, width) + x(cut.end, width)) / 2, 10), width - 10), y: geometry.size.height / 2)
+                }
+            }
         }
+    }
+
+    /// The picked Cut's x.
+    private var removeButton: some View {
+        Button { editor.removePickedCut() } label: {
+            Image(systemName: "xmark.circle.fill")
+                .font(.system(size: 16))
+                .symbolRenderingMode(.palette)
+                .foregroundStyle(.white, Color.black.opacity(0.7))
+        }
+        .buttonStyle(.plain)
+        .help("Remove this Cut")
     }
 
     private func selectionView(_ selection: Cut, width: CGFloat) -> some View {
@@ -212,13 +401,16 @@ private struct SnipTimeline: View {
             .frame(width: Self.handleWidth)
     }
 
+    /// A drag moves less than this (in points) to count as a click.
+    private static let clickSlop: CGFloat = 3
+
     private func gesture(width: CGFloat) -> some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
                 let mode = session.timelineDrag ?? startingDrag(at: value.startLocation.x, width: width)
                 session.timelineDrag = mode
                 let time = self.time(value.location.x, width)
-                let moved = abs(value.translation.width) >= 3
+                let moved = abs(value.translation.width) >= Self.clickSlop
                 switch mode {
                 case .newSpan(let anchor):
                     if moved { editor.select(from: anchor, to: time) }
@@ -229,7 +421,12 @@ private struct SnipTimeline: View {
                 }
                 session.seek(to: min(max(time, 0), editor.duration))
             }
-            .onEnded { _ in session.timelineDrag = nil }
+            .onEnded { value in
+                if case .newSpan? = session.timelineDrag, abs(value.translation.width) < Self.clickSlop {
+                    editor.pickCut(at: time(value.location.x, width))
+                }
+                session.timelineDrag = nil
+            }
     }
 
     private func startingDrag(at location: CGFloat, width: CGFloat) -> TimelineDrag {
@@ -260,8 +457,10 @@ private enum TimelineDrag {
     case end
 }
 
-/// A Cut on the timeline: grey with diagonal stripes.
+/// A Cut on the timeline: grey with diagonal stripes; outlined while picked.
 private struct StripedSpan: View {
+    var picked = false
+
     var body: some View {
         Canvas { context, size in
             context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(.gray.opacity(0.55)))
@@ -273,6 +472,9 @@ private struct StripedSpan: View {
                 x += 7
             }
             context.stroke(stripes, with: .color(.black.opacity(0.25)), lineWidth: 2)
+            if picked {
+                context.stroke(Path(CGRect(origin: .zero, size: size).insetBy(dx: 1, dy: 1)), with: .color(.primary), lineWidth: 2)
+            }
         }
         .allowsHitTesting(false)
     }
