@@ -2,7 +2,7 @@ import AVKit
 import SwiftUI
 import YT4SCore
 
-/// The Snip window of one Done Queue row: a large player, the timeline under it, then Cut and
+/// The Snip window of one Done or Already downloaded Queue row: a large player, the timeline under it, then Cut and
 /// Save Snipped copy. One window per row (opening it again brings it forward); the main window
 /// keeps working behind it. Save hands the Cuts to the Queue and closes the window; the row shows
 /// the progress.
@@ -13,15 +13,15 @@ struct SnipWindow: View {
     let itemID: QueueItem.ID?
 
     var body: some View {
-        if let item = itemID.flatMap(queue.item), case .finished(let file) = item.state {
+        if let item = itemID.flatMap(queue.item), let file = item.doneFile {
             Group {
-                if item.isSnipping {
+                if let source = queue.snipSource(item.id) {
+                    SnipEditorView(queue: queue, itemID: item.id, source: source)
+                } else {
                     // Reopened while its Snip saves: one Snip at a time per row.
                     Text("Saving the Snipped copy. Its progress shows in the Queue.")
                         .foregroundStyle(.secondary)
                         .frame(minWidth: 400, minHeight: 200)
-                } else {
-                    SnipEditorView(queue: queue, itemID: item.id, file: file)
                 }
             }
             .navigationTitle(item.title ?? file.deletingPathExtension().lastPathComponent)
@@ -271,21 +271,26 @@ private struct WindowReader: NSViewRepresentable {
 private struct SnipEditorView: View {
     let queue: Queue
     let itemID: QueueItem.ID
-    let file: URL
+    let source: SnipSource
     @StateObject private var session: SnipSession
     @Environment(\.dismiss) private var dismiss
 
-    init(queue: Queue, itemID: QueueItem.ID, file: URL) {
+    init(queue: Queue, itemID: QueueItem.ID, source: SnipSource) {
         self.queue = queue
         self.itemID = itemID
-        self.file = file
-        _session = StateObject(wrappedValue: SnipSession(file: file))
+        self.source = source
+        _session = StateObject(wrappedValue: SnipSession(file: source.file))
     }
 
     private var editor: SnipEditor { session.editor }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            if let notice = source.notice {
+                Label(notice, systemImage: "info.circle")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
             PlayerView(player: session.player, artwork: session.artwork)
                 .frame(minHeight: 280)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
@@ -317,7 +322,7 @@ private struct SnipEditorView: View {
         .padding(16)
         .frame(minWidth: 560, minHeight: 420)
         .background(WindowReader { session.attach(to: $0) })
-        .task { await session.load(file) }
+        .task { await session.load(source.file) }
         .onChange(of: editor.cuts) { session.cutsChanged() }
         .onDisappear { session.stop() }
     }

@@ -106,7 +106,7 @@ struct LiveSnipTests {
             let plan = SnipPlan(duration: duration, cuts: cuts)
             var saved: URL?
             var fractions: [Double] = []
-            for try await update in Snipper(tools: tools).snip(original, video: video, plan: plan, in: downloadFolder) {
+            for try await update in Snipper(tools: tools).snip(SnipSource(file: original, isSnippedCopy: false), video: video, plan: plan, in: downloadFolder) {
                 switch update {
                 case .progress(let fraction): fractions.append(fraction)
                 case .saved(let copy): saved = copy

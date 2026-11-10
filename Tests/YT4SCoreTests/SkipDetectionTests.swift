@@ -92,6 +92,47 @@ import Testing
         #expect(folder.savedFiles().isEmpty)
     }
 
+    // MARK: - Snipped copies
+
+    /// A Snipped copy of `original` the way a Snip saves it: same tags, marked as a Snipped copy.
+    @discardableResult
+    func saveSnippedCopy(of original: URL, as name: String? = nil) throws -> URL {
+        let copy = name.map { original.deletingLastPathComponent().appendingPathComponent($0) }
+            ?? SnippedCopy.file(for: original) { FileManager.default.fileExists(atPath: $0.path) }
+        try FileManager.default.createDirectory(at: copy.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "snipped".write(to: copy, atomically: true, encoding: .utf8)
+        try folder.tag(copy, with: rick, asSnippedCopy: true)
+        return copy
+    }
+
+    @Test func anOriginalAloneCountsAndIsNotASnippedCopy() throws {
+        let original = try save(rick)
+
+        #expect(folder.savedFiles() == [rick: original])
+        #expect(!folder.isSnippedCopy(original))
+    }
+
+    @Test func onlyTheSnippedCopyCountsAsAlreadyDownloaded() throws {
+        let original = try save(rick)
+        let copy = try saveSnippedCopy(of: original)
+        try FileManager.default.removeItem(at: original)
+
+        #expect(folder.savedFiles() == [rick: copy])
+        #expect(folder.isSnippedCopy(copy))
+    }
+
+    /// Both orders, whichever the folder lists first.
+    @Test(arguments: [("A.mp4", "Z (snipped).mp4"), ("Z.mp4", "A (snipped).mp4")])
+    func withBothTheOriginalIsPreferred(originalName: String, copyName: String) throws {
+        let saved = try save(rick)
+        let original = root.appendingPathComponent(originalName)
+        try FileManager.default.moveItem(at: saved, to: original)
+        try saveSnippedCopy(of: original, as: copyName)
+        try saveSnippedCopy(of: original, as: "Sub/" + copyName)
+
+        #expect(folder.savedFiles()[rick]?.lastPathComponent == originalName)
+    }
+
     @Test func aMissingDownloadFolderHasNothingSaved() {
         #expect(DownloadFolder(url: root.appendingPathComponent("nope")).savedFiles().isEmpty)
     }

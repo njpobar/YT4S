@@ -30,6 +30,7 @@ public struct QueueRow: Equatable, Sendable {
 
     public init(_ item: QueueItem) {
         title = item.title ?? item.request.url
+        status = ""
         fraction = nil
         showsProgress = false
         tone = .normal
@@ -45,35 +46,40 @@ public struct QueueRow: Equatable, Sendable {
             fraction = progress.fraction
             status = Self.runningStatus(progress)
         case .finished(let file):
-            switch item.snip {
-            case nil:
-                status = "Done"
-                tone = .success
-                actions = [.snip, .showInFinder([file])]
-            case .snipping(let snipFraction):
-                status = snipFraction.map { "Snipping \(Self.percent($0))" } ?? "Snipping..."
-                showsProgress = true
-                fraction = snipFraction
-            case .snipped(let copy):
-                status = "Done - snipped"
-                tone = .success
-                actions = [.snip, .showInFinder([file, copy])]
-            }
+            tone = .success
+            applySnip(item.snip, done: "Done", file: file, actions: [])
         case .failed(let failure):
             status = failure.category.sentence
             tone = .failure
             details = failure.details
             actions = failure.category.isRetryable ? [.retry] : []
         case .alreadyDownloaded(let file):
-            status = "Already downloaded"
             tone = .skipped
-            actions = [.downloadAgain, .showInFinder([file])]
+            applySnip(item.snip, done: "Already downloaded", file: file, actions: [.downloadAgain])
         case .cancelled:
             status = "Cancelled"
             actions = [.retry, .remove]
         case .notStarted:
             status = "Not started"
             actions = [.retry, .remove]
+        }
+    }
+
+    /// A Done or Already downloaded row: `done` and its buttons then Snip and Show in Finder, or
+    /// its Snip's progress (no buttons), or `done - snipped` with both files for Show in Finder.
+    private mutating func applySnip(_ snip: SnipStatus?, done: String, file: URL, actions leading: [Action]) {
+        switch snip {
+        case nil:
+            status = done
+            actions = leading + [.snip, .showInFinder([file])]
+        case .snipping(let snipFraction):
+            status = snipFraction.map { "Snipping \(Self.percent($0))" } ?? "Snipping..."
+            tone = .normal
+            showsProgress = true
+            fraction = snipFraction
+        case .snipped(let copy):
+            status = done + " - snipped"
+            actions = leading + [.snip, .showInFinder([file, copy])]
         }
     }
 

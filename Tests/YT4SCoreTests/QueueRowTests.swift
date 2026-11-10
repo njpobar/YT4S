@@ -69,7 +69,7 @@ import Testing
         #expect(actions(.pending) == [.cancel])
         #expect(actions(.running(DownloadProgress())) == [.cancel])
         #expect(actions(.finished(file: file)) == [.snip, .showInFinder([file])])
-        #expect(actions(.alreadyDownloaded(file: file)) == [.downloadAgain, .showInFinder([file])])
+        #expect(actions(.alreadyDownloaded(file: file)) == [.downloadAgain, .snip, .showInFinder([file])])
         #expect(actions(.failed(DownloadFailure(termination: .exited(1), details: "ERROR: x"))) == [.retry])
         #expect(actions(.cancelled) == [.retry, .remove])
     }
@@ -107,6 +107,28 @@ import Testing
         #expect(row.tone == .success)
         #expect(!row.showsProgress)
         #expect(row.actions == [.snip, .showInFinder([file, copy])])
+    }
+
+    @Test func anAlreadyDownloadedRowSnippingShowsItsProgressAndNoButtons() {
+        var item = QueueItem(request: request, state: .alreadyDownloaded(file: URL(fileURLWithPath: "/tmp/YT4S/a.mp4")))
+        item.snip = .snipping(fraction: 0.5)
+        let row = QueueRow(item)
+
+        #expect(row.status == "Snipping 50%")
+        #expect(row.showsProgress)
+        #expect(row.actions.isEmpty)
+    }
+
+    @Test func aSnippedAlreadyDownloadedRowShowsBothFilesInFinder() {
+        let file = URL(fileURLWithPath: "/tmp/YT4S/Me at the zoo.mp4")
+        let copy = URL(fileURLWithPath: "/tmp/YT4S/Me at the zoo (snipped).mp4")
+        var item = QueueItem(request: request, state: .alreadyDownloaded(file: file))
+        item.snip = .snipped(copy: copy)
+        let row = QueueRow(item)
+
+        #expect(row.status == "Already downloaded - snipped")
+        #expect(row.tone == .skipped)
+        #expect(row.actions == [.downloadAgain, .snip, .showInFinder([file, copy])])
     }
 
     private func failedRow(_ stderr: String) -> QueueRow {

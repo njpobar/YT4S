@@ -156,7 +156,7 @@ import Testing
         #expect(queue.items.isEmpty)
     }
 
-    @Test func onlyDoneRowsCanBeSnipped() async throws {
+    @Test func onlyDoneAndAlreadyDownloadedRowsCanBeSnipped() async throws {
         let fake = try FakeYtDlp()
         let queue = Queue(runner: fake.runner(scenario: "video-failure"))
         let id = queue.add(request(fake))
@@ -179,6 +179,131 @@ import Testing
         #expect(QueueRow(queue.item(id)!).status == "Done")
         let names = try FileManager.default.contentsOfDirectory(atPath: fake.downloadFolder.path)
         #expect(names == [original.lastPathComponent])
+    }
+
+    // MARK: - Snipped copy and Already downloaded
+
+    /// A request skip detection can see (its video ID known up front, as when pasted).
+    private func pasted(_ fake: FakeYtDlp, id: String = "abc123") -> DownloadRequest {
+        DownloadRequest(
+            url: "https://www.youtube.com/watch?v=\(id)", downloadFolder: fake.downloadFolder,
+            options: .default, origin: VideoOrigin(sourceKind: .video, videoID: id)
+        )
+    }
+
+    /// Pastes the link again on a fresh Queue; every download would fail, so only a skip ends well.
+    private func pasteAgain(_ fake: FakeYtDlp, scenario: String = "video-failure") async -> (Queue, QueueItem.ID) {
+        let queue = Queue(runner: fake.runner(scenario: scenario))
+        let id = queue.add(pasted(fake))
+        await queue.waitUntilIdle()
+        return (queue, id)
+    }
+
+    /// A Done row snipped once: the original and its Snipped copy.
+    private func snipped(_ fake: FakeYtDlp) async throws -> (original: URL, copy: URL) {
+        let (queue, id, original) = try await finishedRow(fake)
+        queue.snip(id, plan: plan)
+        await queue.waitUntilSnipsFinished()
+        return (original, try #require(snippedCopy(queue, id)))
+    }
+
+    @Test func theSnippedCopyIsMarkedAsOne() async throws {
+        let fake = try FakeYtDlp()
+        let (original, copy) = try await snipped(fake)
+
+        let folder = DownloadFolder(url: fake.downloadFolder)
+        #expect(folder.isSnippedCopy(copy))
+        #expect(!folder.isSnippedCopy(original))
+    }
+
+    @Test func withOnlyTheSnippedCopyLeftThePastedLinkIsAlreadyDownloadedThere() async throws {
+        let fake = try FakeYtDlp()
+        let (original, copy) = try await snipped(fake)
+        try FileManager.default.removeItem(at: original)
+
+        let (queue, id) = await pasteAgain(fake)
+
+        #expect(queue.item(id)?.state == .alreadyDownloaded(file: copy))
+    }
+
+    @Test func withBothTheRowAndShowInFinderUseTheOriginal() async throws {
+        let fake = try FakeYtDlp()
+        let (original, _) = try await snipped(fake)
+
+        let (queue, id) = await pasteAgain(fake)
+
+        #expect(queue.item(id)?.state == .alreadyDownloaded(file: original))
+        #expect(QueueRow(try #require(queue.item(id))).actions == [.downloadAgain, .snip, .showInFinder([original])])
+    }
+
+    @Test func anAlreadyDownloadedRowSnipsItsOriginal() async throws {
+        let fake = try FakeYtDlp()
+        let (_, _, original) = try await finishedRow(fake)
+        let originalBytes = try Data(contentsOf: original)
+        let (again, againID) = await pasteAgain(fake)
+        #expect(again.snipSource(againID) == SnipSource(file: original, isSnippedCopy: false))
+        #expect(again.snipSource(againID)?.notice == nil)
+
+        again.snip(againID, plan: plan)
+        await again.waitUntilSnipsFinished()
+
+        let copy = fake.downloadFolder.appendingPathComponent("Fake Video abc123 (snipped).mp4")
+        #expect(again.item(againID)?.snip == .snipped(copy: copy))
+        #expect(again.item(againID)?.state == .alreadyDownloaded(file: original))
+        #expect(try Data(contentsOf: copy) == originalBytes + Data("snipped\n".utf8))
+        let row = QueueRow(try #require(again.item(againID)))
+        #expect(row.status == "Already downloaded - snipped")
+        #expect(row.actions == [.downloadAgain, .snip, .showInFinder([original, copy])])
+    }
+
+    @Test func withTheOriginalGoneSnipStartsFromTheSnippedCopyAndSaysSo() async throws {
+        let fake = try FakeYtDlp()
+        let (original, copy) = try await snipped(fake)
+        let copyBytes = try Data(contentsOf: copy)
+        try FileManager.default.removeItem(at: original)
+        let (queue, id) = await pasteAgain(fake)
+
+        let source = try #require(queue.snipSource(id))
+        #expect(source == SnipSource(file: copy, isSnippedCopy: true))
+        #expect(source.notice == "Snipping the Snipped copy, the original is gone")
+
+        queue.snip(id, plan: plan)
+        await queue.waitUntilSnipsFinished()
+
+        // Named after the original, numbered, not "(snipped) (snipped)".
+        let second = fake.downloadFolder.appendingPathComponent("Fake Video abc123 (snipped) 2.mp4")
+        #expect(queue.item(id)?.snip == .snipped(copy: second))
+        #expect(try Data(contentsOf: second) == copyBytes + Data("snipped\n".utf8))
+        #expect(try Data(contentsOf: copy) == copyBytes)
+        #expect(DownloadFolder(url: fake.downloadFolder).isSnippedCopy(second))
+    }
+
+    @Test(arguments: [false, true])
+    func downloadAgainSavesANewFullFileAndTouchesNeither(originalGone: Bool) async throws {
+        let fake = try FakeYtDlp()
+        let (original, copy) = try await snipped(fake)
+        let copyBytes = try Data(contentsOf: copy)
+        let originalBytes = try Data(contentsOf: original)
+        if originalGone { try FileManager.default.removeItem(at: original) }
+        let (queue, id) = await pasteAgain(fake, scenario: "success")
+
+        queue.downloadAgain(id)
+        await queue.waitUntilIdle()
+
+        guard case .finished(let fresh) = queue.item(id)?.state else {
+            Issue.record("not finished: \(String(describing: queue.item(id)?.state))")
+            return
+        }
+        #expect(fresh != copy)
+        #expect(queue.item(id)?.snip == nil)
+        #expect(!DownloadFolder(url: fake.downloadFolder).isSnippedCopy(fresh))
+        #expect(try Data(contentsOf: copy) == copyBytes)
+        if originalGone {
+            #expect(fresh == original)
+        } else {
+            #expect(fresh != original)
+            #expect(try Data(contentsOf: original) == originalBytes)
+        }
     }
 
     // MARK: - A download held while a Snip runs

@@ -29,13 +29,30 @@ public enum QueueItemState: Equatable, Sendable {
     case notStarted
 }
 
-/// A Snip of a Done row's file (`GLOSSARY.md`). It never changes the row's own state: the
+/// A Snip of a Done or Already downloaded row's file (`GLOSSARY.md`). It never changes the row's own state: the
 /// download stays finished, so the Queue summary and the batch notification never count it.
 public enum SnipStatus: Equatable, Sendable {
     /// ffmpeg is writing the Snipped copy; `fraction` is `nil` until it reports progress.
     case snipping(fraction: Double?)
     /// The latest Snip saved this Snipped copy next to the original.
     case snipped(copy: URL)
+}
+
+/// The file a Snip of a row starts from: its original, or its Snipped copy when that is all
+/// that is left.
+public struct SnipSource: Equatable, Sendable {
+    /// What ffmpeg reads; never changed.
+    public var file: URL
+    /// The original is gone and `file` is its Snipped copy.
+    public var isSnippedCopy: Bool
+
+    public init(file: URL, isSnippedCopy: Bool) {
+        self.file = file
+        self.isSnippedCopy = isSnippedCopy
+    }
+
+    /// What the Snip window says about where it starts, if anything.
+    public var notice: String? { isSnippedCopy ? SnippedCopy.originalGoneNotice : nil }
 }
 
 /// One video in the Queue.
@@ -86,8 +103,16 @@ public struct QueueItem: Identifiable, Equatable, Sendable {
     /// Whether ffmpeg is writing a Snipped copy of this row's file.
     public var isSnipping: Bool { if case .snipping = snip { true } else { false } }
 
-    /// A Done row with no Snip running: what Snip accepts.
-    public var isSnippable: Bool { isFinished && !isSnipping }
+    /// The file a Done or Already downloaded row points to.
+    public var doneFile: URL? {
+        switch state {
+        case .finished(let file), .alreadyDownloaded(let file): file
+        case .pending, .running, .failed, .cancelled, .notStarted: nil
+        }
+    }
+
+    /// A Done or Already downloaded row with no Snip running: what Snip accepts.
+    public var isSnippable: Bool { doneFile != nil && !isSnipping }
 
     /// Finished or Already downloaded: what "Clear finished" removes.
     public var isDone: Bool {

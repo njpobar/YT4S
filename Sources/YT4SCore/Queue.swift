@@ -75,10 +75,11 @@ public final class Queue {
     }
 
     /// Downloads an Already downloaded item anyway, as a new file under the collision rule
-    /// (the copy already there is kept). No effect on other states.
+    /// (the files already there, original or Snipped copy, are kept). The row forgets its Snip.
+    /// No effect on other states or while the row is snipping.
     public func downloadAgain(_ id: QueueItem.ID) {
-        guard item(id)?.isAlreadyDownloaded == true else { return }
-        update(id) { $0.downloadAgain = true; $0.state = .pending }
+        guard let item = item(id), item.isAlreadyDownloaded, !item.isSnipping else { return }
+        update(id) { $0.downloadAgain = true; $0.snip = nil; $0.state = .pending }
         startWorkerIfNeeded()
     }
 
@@ -147,18 +148,27 @@ public final class Queue {
 
     // MARK: - Snip
 
-    /// Saves a Snipped copy of a Done row's file with `plan`'s Cuts left out, next to the
-    /// original, which is never changed. Runs at once, alongside any download; the row shows
-    /// "Snipping N%", then "Done - snipped". A Snip that fails leaves the row as it was. No effect
-    /// on other rows or while the row is already snipping.
+    /// What a Snip of a Done or Already downloaded row starts from: the row's file, which is the
+    /// original whenever it is there (skip detection prefers it), or the Snipped copy when that
+    /// is all that is left. `nil` when the row cannot be snipped now.
+    public func snipSource(_ id: QueueItem.ID) -> SnipSource? {
+        guard let item = item(id), item.isSnippable, let file = item.doneFile else { return nil }
+        return SnipSource(file: file, isSnippedCopy: DownloadFolder(url: item.request.downloadFolder).isSnippedCopy(file))
+    }
+
+    /// Saves a Snipped copy of a Done or Already downloaded row's file (`snipSource`) with
+    /// `plan`'s Cuts left out, next to it; that file is never changed. Runs at once, alongside any
+    /// download; the row shows "Snipping N%", then "Done - snipped" (or "Already downloaded -
+    /// snipped"). A Snip that fails leaves the row as it was. No effect on other rows or while the
+    /// row is already snipping.
     public func snip(_ id: QueueItem.ID, plan: SnipPlan) {
-        guard let item = item(id), item.isSnippable, case .finished(let original) = item.state else { return }
+        guard let item = item(id), let source = snipSource(id) else { return }
         let folder = DownloadFolder(url: item.request.downloadFolder)
-        guard let video = folder.savedVideo(ofFileAt: original)
+        guard let video = folder.savedVideo(ofFileAt: source.file)
             ?? item.videoID.map({ SavedVideo(videoID: $0, format: item.request.options.format) }) else { return }
         let before = item.snip
         update(id) { $0.snip = .snipping(fraction: nil) }
-        let updates = Snipper(tools: runner.tools, environment: runner.environment).snip(original, video: video, plan: plan, in: folder)
+        let updates = Snipper(tools: runner.tools, environment: runner.environment).snip(source, video: video, plan: plan, in: folder)
         let activity = ProcessInfo.processInfo.beginActivity(options: .userInitiated, reason: "Snipping a video")
         snips[id] = Task { [weak self] in
             defer { ProcessInfo.processInfo.endActivity(activity) }
@@ -351,7 +361,10 @@ public final class Queue {
             case .placed(let placed):
                 attempt.file = nil
                 let folder = attempt.request.downloadFolder
-                if savedFiles[folder]?[saved] == nil { savedFiles[folder]?[saved] = placed }
+                // A new original wins over a Snipped copy this batch found.
+                if savedFiles[folder]?[saved].map(attempt.downloadFolder.isSnippedCopy) ?? true {
+                    savedFiles[folder]?[saved] = placed
+                }
                 update(id) { $0.plannedFile = placed; $0.state = .finished(file: placed) }
             case .alreadyThere(let existing):
                 // Saved meanwhile (e.g. listed twice in this batch): never overwritten.

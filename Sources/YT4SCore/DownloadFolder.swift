@@ -27,6 +27,9 @@ public struct DownloadFolder: Equatable, Sendable {
     public static let videoIDAttribute = "com.yt4s.videoid"
     /// Extended attribute holding the `Format` raw value (`video` / `mp3`) of a file YT4S saved.
     public static let formatAttribute = "com.yt4s.format"
+    /// Extended attribute marking a file as a Snipped copy (`GLOSSARY.md`): the same video in the
+    /// same Format as its original, so it counts as Already downloaded, but the original wins.
+    public static let snippedCopyAttribute = "com.yt4s.snipped"
     /// Hidden folder inside the Download folder holding downloads in progress (same volume, so
     /// placing is a rename). Partial files left by a cancelled download resume on retry.
     public static let incompleteFolderName = ".yt4s-incomplete"
@@ -55,8 +58,14 @@ public struct DownloadFolder: Equatable, Sendable {
         return SavedVideo(videoID: id, format: format)
     }
 
+    /// Whether `file` is a Snipped copy (tagged by a Snip, not by a download).
+    public func isSnippedCopy(_ file: URL) -> Bool {
+        Self.attribute(Self.snippedCopyAttribute, of: file) != nil
+    }
+
     /// Every file YT4S saved anywhere inside the folder (subfolders too, under any name), by
     /// video and Format. Downloads in progress do not count. Empty when the folder is missing.
+    /// An original wins over its Snipped copies; a Snipped copy stands in when the original is gone.
     public func savedFiles() -> [SavedVideo: URL] {
         // Relative paths, so the URLs are spelled like `url` (not resolved through /private).
         guard let enumerator = FileManager.default.enumerator(atPath: url.path) else { return [:] }
@@ -69,7 +78,8 @@ public struct DownloadFolder: Equatable, Sendable {
             guard enumerator.fileAttributes?[.type] as? FileAttributeType == .typeRegular else { continue }
             let file = url.appendingPathComponent(relativePath)
             guard let video = savedVideo(ofFileAt: file) else { continue }
-            saved[video] = saved[video] ?? file
+            if let found = saved[video], !isSnippedCopy(found) || isSnippedCopy(file) { continue }
+            saved[video] = file
         }
         return saved
     }
@@ -107,9 +117,12 @@ public struct DownloadFolder: Equatable, Sendable {
         return .placed(destination)
     }
 
-    /// Tags a saved file with its video ID and Format, so `savedFiles` finds it under any name.
-    public func tag(_ file: URL, with video: SavedVideo) throws {
-        for (name, value) in [(Self.videoIDAttribute, video.videoID), (Self.formatAttribute, video.format.rawValue)] {
+    /// Tags a saved file with its video ID and Format, so `savedFiles` finds it under any name;
+    /// `asSnippedCopy` also marks it as a Snipped copy.
+    public func tag(_ file: URL, with video: SavedVideo, asSnippedCopy: Bool = false) throws {
+        var attributes = [(Self.videoIDAttribute, video.videoID), (Self.formatAttribute, video.format.rawValue)]
+        if asSnippedCopy { attributes.append((Self.snippedCopyAttribute, "1")) }
+        for (name, value) in attributes {
             let bytes = Array(value.utf8)
             guard setxattr(file.path, name, bytes, bytes.count, 0, 0) == 0 else {
                 throw CocoaError(.fileWriteUnknown, userInfo: [NSFilePathErrorKey: file.path])
