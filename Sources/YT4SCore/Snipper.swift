@@ -79,7 +79,9 @@ public struct Snipper: Sendable {
         } catch is CancellationError {
             throw CancellationError()
         } catch {
-            throw SnipFailure(details: String(describing: error))
+            // The error's own message ("... couldn't be moved because you don't have permission
+            // ..."), not the NSError dump.
+            throw SnipFailure(details: error.localizedDescription)
         }
     }
 

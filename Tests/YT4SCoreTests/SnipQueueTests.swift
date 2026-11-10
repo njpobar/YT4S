@@ -213,6 +213,22 @@ import Testing
         try expectOnlyTheOriginal(fake, original)
     }
 
+    @Test func aSaveThatFailsOutsideFfmpegShowsTheErrorsOwnMessageInDetails() async throws {
+        let fake = try FakeYtDlp()
+        let (queue, id, _) = try await finishedRow(fake)
+        // Nothing can be created in the Download folder, so ffmpeg never gets a place to write.
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: fake.downloadFolder.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fake.downloadFolder.path) }
+
+        queue.snip(id, plan: plan)
+        await queue.waitUntilSnipsFinished()
+
+        let item = try #require(queue.item(id))
+        let details = try #require(QueueRow(item).details)
+        #expect(details.contains("permission"))
+        #expect(!details.contains("Error Domain"))
+    }
+
     @Test func afterAFailedSaveSnipWorksAgain() async throws {
         let fake = try FakeYtDlp()
         let failure = fake.downloadFolder.deletingLastPathComponent().appendingPathComponent("fail")
