@@ -168,17 +168,163 @@ import Testing
         #expect(queue.item(id)?.snip == nil)
     }
 
-    @Test func aSnipThatFailsLeavesTheRowDoneAndNoPartialCopy() async throws {
+    // MARK: - Cancel and failures
+
+    /// Only the original is left in the Download folder: no partial copy, no incomplete folder.
+    private func expectOnlyTheOriginal(_ fake: FakeYtDlp, _ original: URL) throws {
+        let names = try FileManager.default.contentsOfDirectory(atPath: fake.downloadFolder.path)
+        #expect(names == [original.lastPathComponent])
+    }
+
+    @Test func cancelWhileSnippingDeletesThePartialCopyAndReturnsTheRowToDone() async throws {
+        let fake = try FakeYtDlp()
+        let hold = fake.holdSnip()
+        defer { try? hold.release() }
+        let (queue, id, original) = try await finishedRow(fake, environment: hold.environment)
+
+        queue.snip(id, plan: plan)
+        try await waitUntil { queue.item(id)?.snip == .snipping(fraction: 0) }
+        #expect(QueueRow(queue.item(id)!).actions == [.cancel])
+        queue.cancel(id)
+        await queue.waitUntilSnipsFinished()
+
+        #expect(queue.item(id)?.snip == nil)
+        #expect(queue.item(id)?.state == .finished(file: original))
+        let row = QueueRow(queue.item(id)!)
+        #expect(row.status == "Done")
+        #expect(row.actions == [.snip, .showInFinder([original])])
+        try expectOnlyTheOriginal(fake, original)
+    }
+
+    @Test func aFailedSaveDeletesThePartialCopyAndSaysSoWithDetails() async throws {
         let fake = try FakeYtDlp()
         let (queue, id, original) = try await finishedRow(fake, environment: ["YT4S_FAKE_FFMPEG_FAIL": "No space left on device"])
 
         queue.snip(id, plan: plan)
         await queue.waitUntilSnipsFinished()
 
+        #expect(queue.item(id)?.state == .finished(file: original))
+        let row = QueueRow(try #require(queue.item(id)))
+        #expect(row.status == "Couldn't save the Snipped copy")
+        #expect(row.tone == .failure)
+        #expect(row.details?.contains("No space left on device") == true)
+        #expect(row.actions == [.snip, .showInFinder([original])])
+        #expect(queue.snipSource(id) == SnipSource(file: original, isSnippedCopy: false))
+        try expectOnlyTheOriginal(fake, original)
+    }
+
+    @Test func afterAFailedSaveSnipWorksAgain() async throws {
+        let fake = try FakeYtDlp()
+        let failure = fake.downloadFolder.deletingLastPathComponent().appendingPathComponent("fail")
+        try Data().write(to: failure)
+        let (queue, id, original) = try await finishedRow(fake, environment: ["YT4S_FAKE_FFMPEG_FAIL_IF": failure.path])
+        queue.snip(id, plan: plan)
+        await queue.waitUntilSnipsFinished()
+        try FileManager.default.removeItem(at: failure)
+
+        queue.snip(id, plan: plan)
+        await queue.waitUntilSnipsFinished()
+
+        let copy = fake.downloadFolder.appendingPathComponent("Fake Video abc123 (snipped).mp4")
+        #expect(queue.item(id)?.snip == .snipped(copy: copy))
+        let row = QueueRow(try #require(queue.item(id)))
+        #expect(row.status == "Done - snipped")
+        #expect(row.details == nil)
+        #expect(row.actions == [.snip, .showInFinder([original, copy])])
+    }
+
+    @Test func cancellingTheSnipAfterAFailedOneReturnsTheRowToPlainDone() async throws {
+        let fake = try FakeYtDlp()
+        let hold = fake.holdSnip()
+        defer { try? hold.release() }
+        let failure = fake.downloadFolder.deletingLastPathComponent().appendingPathComponent("fail")
+        try Data().write(to: failure)
+        var environment = hold.environment
+        environment["YT4S_FAKE_FFMPEG_FAIL_IF"] = failure.path
+        let (queue, id, original) = try await finishedRow(fake, environment: environment)
+        queue.snip(id, plan: plan)
+        await queue.waitUntilSnipsFinished()
+        try FileManager.default.removeItem(at: failure)
+
+        queue.snip(id, plan: plan)
+        try await waitUntil { queue.item(id)?.snip == .snipping(fraction: 0) }
+        queue.cancel(id)
+        await queue.waitUntilSnipsFinished()
+
+        let row = QueueRow(try #require(queue.item(id)))
+        #expect(row.status == "Done")
+        #expect(row.details == nil)
+        try expectOnlyTheOriginal(fake, original)
+    }
+
+    @Test func quittingMidSnipLeavesNoPartialCopy() async throws {
+        let fake = try FakeYtDlp()
+        let hold = fake.holdSnip()
+        defer { try? hold.release() }
+        let (queue, id, original) = try await finishedRow(fake, environment: hold.environment)
+        queue.snip(id, plan: plan)
+        try await waitUntil { queue.item(id)?.snip == .snipping(fraction: 0) }
+
+        // Right away: the app exits as soon as it returns.
+        queue.stopSnipsForQuit()
+        try expectOnlyTheOriginal(fake, original)
+
+        try hold.release()
+        await queue.waitUntilSnipsFinished()
+        try expectOnlyTheOriginal(fake, original)
+    }
+
+    @Test func snipFollowsAFileRenamedAndMovedWithinTheDownloadFolder() async throws {
+        let fake = try FakeYtDlp()
+        let (queue, id, original) = try await finishedRow(fake)
+        let moved = fake.downloadFolder.appendingPathComponent("Talks/03 - Renamed.mp4")
+        try FileManager.default.createDirectory(at: moved.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.moveItem(at: original, to: moved)
+
+        #expect(queue.prepareSnip(id) == .ready(SnipSource(file: moved, isSnippedCopy: false)))
+        #expect(queue.item(id)?.state == .finished(file: moved))
+        #expect(QueueRow(try #require(queue.item(id))).actions == [.snip, .showInFinder([moved])])
+
+        queue.snip(id, plan: plan)
+        await queue.waitUntilSnipsFinished()
+        let copy = fake.downloadFolder.appendingPathComponent("Talks/03 - Renamed (snipped).mp4")
+        #expect(queue.item(id)?.snip == .snipped(copy: copy))
+    }
+
+    @Test func snipFindsTheSnippedCopyWhenTheOriginalWasDeletedSincePressingSnip() async throws {
+        let fake = try FakeYtDlp()
+        let (queue, id, original) = try await finishedRow(fake)
+        queue.snip(id, plan: plan)
+        await queue.waitUntilSnipsFinished()
+        let copy = try #require(snippedCopy(queue, id))
+        try FileManager.default.removeItem(at: original)
+
+        #expect(queue.prepareSnip(id) == .ready(SnipSource(file: copy, isSnippedCopy: true)))
+    }
+
+    @Test func snipOnAFileGoneFromTheDownloadFolderSaysSoAndChangesNothing() async throws {
+        let fake = try FakeYtDlp()
+        let (queue, id, original) = try await finishedRow(fake)
+        let outside = fake.downloadFolder.deletingLastPathComponent().appendingPathComponent("elsewhere.mp4")
+        try FileManager.default.moveItem(at: original, to: outside)
+
+        #expect(queue.prepareSnip(id) == .fileGone)
+        #expect(SnipStart.fileGoneAlert == "This file is no longer in the Download folder")
+        #expect(queue.item(id)?.state == .finished(file: original))
         #expect(queue.item(id)?.snip == nil)
-        #expect(QueueRow(queue.item(id)!).status == "Done")
-        let names = try FileManager.default.contentsOfDirectory(atPath: fake.downloadFolder.path)
-        #expect(names == [original.lastPathComponent])
+    }
+
+    @Test func snipOnARowThatCannotBeSnippedNowPreparesNothing() async throws {
+        let fake = try FakeYtDlp()
+        let hold = fake.holdSnip()
+        defer { try? hold.release() }
+        let (queue, id, _) = try await finishedRow(fake, environment: hold.environment)
+        queue.snip(id, plan: plan)
+
+        #expect(queue.prepareSnip(id) == nil)
+
+        try hold.release()
+        await queue.waitUntilSnipsFinished()
     }
 
     // MARK: - Snipped copy and Already downloaded

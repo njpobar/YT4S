@@ -6,18 +6,10 @@ public struct SnipFailure: Error, Equatable, Sendable {
     public var details: String
 }
 
-/// What a running Snip reports, in order.
-public enum SnipUpdate: Equatable, Sendable {
-    /// How much of the Snipped copy ffmpeg has written, 0 to 1.
-    case progress(Double)
-    /// Always the last update of a Snip that succeeded: the Snipped copy, placed and tagged.
-    case saved(URL)
-}
-
 /// Makes a Snipped copy with the bundled ffmpeg (`SnipArguments`).
 ///
 /// ffmpeg writes into a subfolder of the Download folder's hidden incomplete folder (same volume,
-/// so placing is a rename, and a quit mid-Snip leaves nothing the next launch does not remove). Once it
+/// so placing is a rename; a quit mid-Snip removes it, `Queue.stopSnipsForQuit`). Once it
 /// succeeds the copy is moved next to the original under its Snipped copy name and tagged like
 /// the original, so it counts as Already downloaded, and marked as a Snipped copy, so the
 /// original wins when both exist. The original is only ever read.
@@ -34,57 +26,60 @@ public struct Snipper: Sendable {
         self.environment = environment
     }
 
+    /// A new folder for one Snip to write into, inside `folder`'s hidden incomplete folder.
+    public static func newWorkFolder(in folder: DownloadFolder) -> URL {
+        folder.incompleteFolder.appendingPathComponent("snip-\(UUID().uuidString)", isDirectory: true)
+    }
+
     /// Snips `source`, a file of `folder` saved as `video` (its original, or its Snipped copy when
-    /// the original is gone). Ends with `.saved`, or throws a `SnipFailure` with nothing left
-    /// behind. Cancelling the consumer stops ffmpeg.
-    public func snip(_ source: SnipSource, video: SavedVideo, plan: SnipPlan, in folder: DownloadFolder) -> AsyncThrowingStream<SnipUpdate, Error> {
+    /// the original is gone), with ffmpeg writing into `workFolder` (`newWorkFolder`). Returns the
+    /// Snipped copy, placed and tagged, after reporting how much of it ffmpeg has written (0 to 1)
+    /// to `onProgress`, in order. Throws a `SnipFailure`, or `CancellationError` when the calling
+    /// task is cancelled (ffmpeg is stopped); either way it returns only once `workFolder` and any
+    /// copy it placed are gone.
+    public func snip(
+        _ source: SnipSource, video: SavedVideo, plan: SnipPlan, in folder: DownloadFolder, workFolder: URL,
+        onProgress: @escaping @Sendable (Double) -> Void = { _ in }
+    ) async throws -> URL {
         let input = source.file
-        let ffmpeg = ffmpeg
-        let ffprobe = ffprobe
-        let environment = environment
-        return AsyncThrowingStream { continuation in
-            let task = Task {
-                // Its own subfolder, removed when done; the incomplete folder itself is left
-                // alone, as a download may be about to write into it.
-                let workFolder = folder.incompleteFolder.appendingPathComponent("snip-\(UUID().uuidString)", isDirectory: true)
-                let partial = workFolder.appendingPathComponent("snipped").appendingPathExtension(input.pathExtension)
-                defer { try? FileManager.default.removeItem(at: workFolder) }
-                do {
-                    try FileManager.default.createDirectory(at: workFolder, withIntermediateDirectories: true)
-                    let keptDuration = plan.keptDuration
-                    let bitrates = await Self.bitrates(of: input, ffprobe: ffprobe, environment: environment)
-                    let result = try await Subprocess.run(
-                        executable: ffmpeg,
-                        arguments: SnipArguments.arguments(input: input, output: partial, format: video.format, plan: plan, bitrates: bitrates),
-                        environment: environment,
-                        onStdoutLine: { line in
-                            if let fraction = SnipArguments.fraction(ofProgressLine: line, keptDuration: keptDuration) {
-                                continuation.yield(.progress(fraction))
-                            }
-                        }
-                    )
-                    try Task.checkCancellation()
-                    guard result.termination == .exited(0) else { throw SnipFailure(details: result.stderr) }
-                    let copy = SnippedCopy.file(for: input, sourceIsSnippedCopy: source.isSnippedCopy) { FileManager.default.fileExists(atPath: $0.path) }
-                    // Fails rather than replaces if a file appeared there meanwhile.
-                    try FileManager.default.moveItem(at: partial, to: copy)
-                    do {
-                        try folder.tag(copy, with: video, asSnippedCopy: true)
-                    } catch {
-                        try? FileManager.default.removeItem(at: copy)
-                        throw error
+        let partial = workFolder.appendingPathComponent("snipped").appendingPathExtension(input.pathExtension)
+        // Its own subfolder, removed when done; the incomplete folder itself is left alone, as a
+        // download may be about to write into it.
+        defer { try? FileManager.default.removeItem(at: workFolder) }
+        do {
+            try FileManager.default.createDirectory(at: workFolder, withIntermediateDirectories: true)
+            let keptDuration = plan.keptDuration
+            let bitrates = await Self.bitrates(of: input, ffprobe: ffprobe, environment: environment)
+            let result = try await Subprocess.run(
+                executable: ffmpeg,
+                arguments: SnipArguments.arguments(input: input, output: partial, format: video.format, plan: plan, bitrates: bitrates),
+                environment: environment,
+                onStdoutLine: { line in
+                    if let fraction = SnipArguments.fraction(ofProgressLine: line, keptDuration: keptDuration) {
+                        onProgress(fraction)
                     }
-                    continuation.yield(.saved(copy))
-                    continuation.finish()
-                } catch let failure as SnipFailure {
-                    continuation.finish(throwing: failure)
-                } catch is CancellationError {
-                    continuation.finish(throwing: CancellationError())
-                } catch {
-                    continuation.finish(throwing: SnipFailure(details: String(describing: error)))
                 }
+            )
+            try Task.checkCancellation()
+            guard result.termination == .exited(0) else { throw SnipFailure(details: result.stderr) }
+            let copy = SnippedCopy.file(for: input, sourceIsSnippedCopy: source.isSnippedCopy) { FileManager.default.fileExists(atPath: $0.path) }
+            // Fails rather than replaces if a file appeared there meanwhile.
+            try FileManager.default.moveItem(at: partial, to: copy)
+            do {
+                try folder.tag(copy, with: video, asSnippedCopy: true)
+                // Cancelled while placing it: the copy is not kept either.
+                try Task.checkCancellation()
+            } catch {
+                try? FileManager.default.removeItem(at: copy)
+                throw error
             }
-            continuation.onTermination = { _ in task.cancel() }
+            return copy
+        } catch let error as SnipFailure {
+            throw error
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            throw SnipFailure(details: String(describing: error))
         }
     }
 

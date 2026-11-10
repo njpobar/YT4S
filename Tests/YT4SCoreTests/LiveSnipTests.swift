@@ -104,17 +104,24 @@ struct LiveSnipTests {
 
         func snip(_ original: URL, video: SavedVideo, cuts: [Cut], duration: Double) async throws -> URL {
             let plan = SnipPlan(duration: duration, cuts: cuts)
-            var saved: URL?
-            var fractions: [Double] = []
-            for try await update in Snipper(tools: tools).snip(SnipSource(file: original, isSnippedCopy: false), video: video, plan: plan, in: downloadFolder) {
-                switch update {
-                case .progress(let fraction): fractions.append(fraction)
-                case .saved(let copy): saved = copy
-                }
-            }
-            #expect(!fractions.isEmpty)
-            #expect(fractions == fractions.sorted())
-            return try #require(saved)
+            let fractions = Fractions()
+            let copy = try await Snipper(tools: tools).snip(
+                SnipSource(file: original, isSnippedCopy: false), video: video, plan: plan,
+                in: downloadFolder, workFolder: Snipper.newWorkFolder(in: downloadFolder),
+                onProgress: { fractions.append($0) }
+            )
+            let reported = fractions.values
+            #expect(!reported.isEmpty)
+            #expect(reported == reported.sorted())
+            return copy
+        }
+
+        /// What `onProgress` reported, from ffmpeg's output thread.
+        private final class Fractions: @unchecked Sendable {
+            private let lock = NSLock()
+            private var reported: [Double] = []
+            var values: [Double] { lock.withLock { reported } }
+            func append(_ fraction: Double) { lock.withLock { reported.append(fraction) } }
         }
 
         /// The copy is encoded at about the original's bitrates, so with half the file cut it is

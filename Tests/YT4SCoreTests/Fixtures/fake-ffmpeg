@@ -12,7 +12,9 @@
 #                                   YT4S_FAKE_FFMPEG_RELEASE_FILE exists (lets a test look mid-Snip)
 #   YT4S_FAKE_FFMPEG_RELEASE_FILE   see YT4S_FAKE_FFMPEG_HOLD
 #   YT4S_FAKE_FFMPEG_ARGV_LOG       if set, argv is written there, each element NUL-terminated
-#   YT4S_FAKE_FFMPEG_FAIL           if set, prints it on stderr and exits 1 without writing output
+#   YT4S_FAKE_FFMPEG_FAIL           if set, writes part of the output (as a full disk would leave it),
+#                                   prints it on stderr and exits 1
+#   YT4S_FAKE_FFMPEG_FAIL_IF        if set and that file exists, fails as YT4S_FAKE_FFMPEG_FAIL does
 
 emulate -L zsh
 setopt no_unset pipe_fail
@@ -33,7 +35,12 @@ if [[ -z $input || ! -f $input ]]; then
   exit 1
 fi
 
+if [[ -n ${YT4S_FAKE_FFMPEG_FAIL_IF:-} && -e $YT4S_FAKE_FFMPEG_FAIL_IF ]]; then
+  : ${YT4S_FAKE_FFMPEG_FAIL:=No space left on device}
+fi
+
 if [[ -n ${YT4S_FAKE_FFMPEG_FAIL:-} ]]; then
+  print -n -- "partial" > "$output"
   print -u2 -- "$YT4S_FAKE_FFMPEG_FAIL"
   exit 1
 fi

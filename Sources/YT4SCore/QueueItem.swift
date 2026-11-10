@@ -36,6 +36,9 @@ public enum SnipStatus: Equatable, Sendable {
     case snipping(fraction: Double?)
     /// The latest Snip saved this Snipped copy next to the original.
     case snipped(copy: URL)
+    /// The latest Snip could not save its Snipped copy (nothing was left behind); `details` is
+    /// the raw ffmpeg output or error, for the Details disclosure.
+    case failed(details: String)
 }
 
 /// The file a Snip of a row starts from: its original, or its Snipped copy when that is all
@@ -53,6 +56,17 @@ public struct SnipSource: Equatable, Sendable {
 
     /// What the Snip window says about where it starts, if anything.
     public var notice: String? { isSnippedCopy ? SnippedCopy.originalGoneNotice : nil }
+}
+
+/// What pressing Snip on a row finds (`Queue.prepareSnip`).
+public enum SnipStart: Equatable, Sendable {
+    /// Open the Snip window on this file.
+    case ready(SnipSource)
+    /// Neither the original nor a Snipped copy is anywhere in the Download folder any more.
+    case fileGone
+
+    /// The alert shown instead of the Snip window when the file is gone.
+    public static let fileGoneAlert = "This file is no longer in the Download folder"
 }
 
 /// One video in the Queue.
@@ -108,6 +122,16 @@ public struct QueueItem: Identifiable, Equatable, Sendable {
         switch state {
         case .finished(let file), .alreadyDownloaded(let file): file
         case .pending, .running, .failed, .cancelled, .notStarted: nil
+        }
+    }
+
+    /// Points a Done or Already downloaded row at `file`, where its video is now (the file on disk
+    /// is not touched). No effect on other states.
+    mutating func pointDoneFile(at file: URL) {
+        switch state {
+        case .finished: state = .finished(file: file)
+        case .alreadyDownloaded: state = .alreadyDownloaded(file: file)
+        case .pending, .running, .failed, .cancelled, .notStarted: break
         }
     }
 

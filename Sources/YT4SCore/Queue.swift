@@ -24,7 +24,7 @@ public final class Queue {
     /// to date with what the batch saves. The folder is the only record (no ledger).
     @ObservationIgnored private var savedFiles: [URL: [SavedVideo: URL]] = [:]
     /// Snips running, by row. They run alongside downloads, never in the worker.
-    @ObservationIgnored private var snips: [QueueItem.ID: Task<Void, Never>] = [:]
+    @ObservationIgnored private var snips: [QueueItem.ID: RunningSnip] = [:]
     /// The Looks-outdated banner and early stop.
     private var outdated = OutdatedBatch()
 
@@ -96,9 +96,14 @@ public final class Queue {
     /// True while any video is waiting or running. Derived from `items`, so it is observable.
     public var hasActiveDownloads: Bool { items.contains(where: \.isActive) }
 
-    /// Stops a pending or running item and deletes its partial files. No effect on other states.
+    /// Stops a pending or running item and deletes its partial files, or stops a row's Snip and
+    /// deletes its partial copy (the row is Done again, as before the Snip). No effect on other states.
     public func cancel(_ id: QueueItem.ID) {
         guard let item = item(id) else { return }
+        if item.isSnipping {
+            snips[id]?.task.cancel()
+            return
+        }
         switch item.state {
         case .pending:
             update(id) { $0.state = .cancelled }
@@ -156,31 +161,62 @@ public final class Queue {
         return SnipSource(file: file, isSnippedCopy: DownloadFolder(url: item.request.downloadFolder).isSnippedCopy(file))
     }
 
+    /// Snip pressed on a row: finds its file again by its tags, wherever it was renamed or moved
+    /// to inside the Download folder (the original whenever it is there, else a Snipped copy), and
+    /// points the row at it. `.fileGone` when it is no longer in the Download folder; `nil` when
+    /// the row cannot be snipped now.
+    public func prepareSnip(_ id: QueueItem.ID) -> SnipStart? {
+        guard let item = item(id), item.isSnippable, let file = item.doneFile else { return nil }
+        let folder = DownloadFolder(url: item.request.downloadFolder)
+        guard let video = savedVideo(of: item, in: folder),
+              let found = folder.file(of: video, probablyAt: file) else { return .fileGone }
+        if found != file { update(id) { $0.pointDoneFile(at: found) } }
+        return snipSource(id).map(SnipStart.ready) ?? .fileGone
+    }
+
+    /// The video and Format a row's file holds: the row's own, else its file's tags.
+    private func savedVideo(of item: QueueItem, in folder: DownloadFolder) -> SavedVideo? {
+        item.videoID.map { SavedVideo(videoID: $0, format: item.request.options.format) }
+            ?? item.doneFile.flatMap(folder.savedVideo(ofFileAt:))
+    }
+
     /// Saves a Snipped copy of a Done or Already downloaded row's file (`snipSource`) with
     /// `plan`'s Cuts left out, next to it; that file is never changed. Runs at once, alongside any
     /// download; the row shows "Snipping N%", then "Done - snipped" (or "Already downloaded -
-    /// snipped"). A Snip that fails leaves the row as it was. No effect on other rows or while the
+    /// snipped"). A Snip that fails leaves nothing behind and the row says "Couldn't save the
+    /// Snipped copy" with Details; Snip is available again. No effect on other rows or while the
     /// row is already snipping.
     public func snip(_ id: QueueItem.ID, plan: SnipPlan) {
         guard let item = item(id), let source = snipSource(id) else { return }
         let folder = DownloadFolder(url: item.request.downloadFolder)
-        guard let video = folder.savedVideo(ofFileAt: source.file)
-            ?? item.videoID.map({ SavedVideo(videoID: $0, format: item.request.options.format) }) else { return }
-        let before = item.snip
+        guard let video = savedVideo(of: item, in: folder) else { return }
+        // What a cancelled Snip returns the row to: its last saved Snipped copy, if any.
+        let before: SnipStatus? = if case .snipped = item.snip { item.snip } else { nil }
         update(id) { $0.snip = .snipping(fraction: nil) }
-        let updates = Snipper(tools: runner.tools, environment: runner.environment).snip(source, video: video, plan: plan, in: folder)
+        let workFolder = Snipper.newWorkFolder(in: folder)
+        let snipper = Snipper(tools: runner.tools, environment: runner.environment)
         let activity = ProcessInfo.processInfo.beginActivity(options: .userInitiated, reason: "Snipping a video")
-        snips[id] = Task { [weak self] in
+        let task = Task { [weak self] in
             defer { ProcessInfo.processInfo.endActivity(activity) }
-            var result = before
+            let progress = AsyncStream.makeStream(of: Double.self)
+            // A child task, so cancelling this one stops ffmpeg; it ends only once its files are gone.
+            async let copy = {
+                defer { progress.continuation.finish() }
+                return try await snipper.snip(
+                    source, video: video, plan: plan, in: folder, workFolder: workFolder,
+                    onProgress: { progress.continuation.yield($0) }
+                )
+            }()
+            for await fraction in progress.stream {
+                self?.update(id) { $0.snip = .snipping(fraction: fraction) }
+            }
+            let result: SnipStatus?
             do {
-                for try await update in updates {
-                    switch update {
-                    case .progress(let fraction): self?.update(id) { $0.snip = .snipping(fraction: fraction) }
-                    case .saved(let copy): result = .snipped(copy: copy)
-                    }
-                }
+                result = .snipped(copy: try await copy)
+            } catch let failure as SnipFailure {
+                result = .failed(details: failure.details)
             } catch {
+                // Cancelled: the row is Done again, as before the Snip.
                 result = before
             }
             guard let self else { return }
@@ -191,13 +227,31 @@ public final class Queue {
                 folder.removeIncompleteFolderIfEmpty()
             }
         }
+        snips[id] = RunningSnip(task: task, workFolder: workFolder)
+    }
+
+    /// Quitting: stops every Snip and deletes its partial copy before returning, as the app exits
+    /// right after. Call it once `ChildProcesses.terminateAll` has stopped ffmpeg.
+    public func stopSnipsForQuit() {
+        for (id, snip) in snips {
+            snip.task.cancel()
+            try? FileManager.default.removeItem(at: snip.workFolder)
+            // Nothing else writes there any more: downloads were stopped with ffmpeg.
+            item(id).map { DownloadFolder(url: $0.request.downloadFolder).removeIncompleteFolderIfEmpty() }
+        }
     }
 
     /// Returns once no Snip is running.
     public func waitUntilSnipsFinished() async {
         while let snip = snips.values.first {
-            await snip.value
+            await snip.task.value
         }
+    }
+
+    /// A Snip in progress: what stops it, and the folder ffmpeg writes its partial copy into.
+    private struct RunningSnip {
+        let task: Task<Void, Never>
+        let workFolder: URL
     }
 
     private func startWorkerIfNeeded() {

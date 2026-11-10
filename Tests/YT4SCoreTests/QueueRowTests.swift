@@ -74,7 +74,7 @@ import Testing
         #expect(actions(.cancelled) == [.retry, .remove])
     }
 
-    @Test func aSnippingRowShowsItsProgressAndNoButtons() {
+    @Test func aSnippingRowShowsItsProgressAndOnlyCancel() {
         let file = URL(fileURLWithPath: "/tmp/YT4S/Me at the zoo.mp4")
         var item = QueueItem(request: request, title: "Me at the zoo", state: .finished(file: file))
         item.snip = .snipping(fraction: 0.427)
@@ -84,7 +84,7 @@ import Testing
         #expect(row.showsProgress)
         #expect(row.fraction == 0.427)
         #expect(row.tone == .normal)
-        #expect(row.actions.isEmpty)
+        #expect(row.actions == [.cancel])
     }
 
     @Test func aSnippingRowBeforeItsFirstProgressIsIndeterminate() {
@@ -109,14 +109,14 @@ import Testing
         #expect(row.actions == [.snip, .showInFinder([file, copy])])
     }
 
-    @Test func anAlreadyDownloadedRowSnippingShowsItsProgressAndNoButtons() {
+    @Test func anAlreadyDownloadedRowSnippingShowsItsProgressAndOnlyCancel() {
         var item = QueueItem(request: request, state: .alreadyDownloaded(file: URL(fileURLWithPath: "/tmp/YT4S/a.mp4")))
         item.snip = .snipping(fraction: 0.5)
         let row = QueueRow(item)
 
         #expect(row.status == "Snipping 50%")
         #expect(row.showsProgress)
-        #expect(row.actions.isEmpty)
+        #expect(row.actions == [.cancel])
     }
 
     @Test func aSnippedAlreadyDownloadedRowShowsBothFilesInFinder() {

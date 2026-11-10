@@ -84,6 +84,17 @@ public struct DownloadFolder: Equatable, Sendable {
         return saved
     }
 
+    /// The file holding `video` now, wherever it was renamed or moved to inside the folder: the
+    /// original whenever it is there, else a Snipped copy (`savedFiles`); `nil` when neither is.
+    /// `likely` is checked first, so the folder is looked through only when the original is not there.
+    public func file(of video: SavedVideo, probablyAt likely: URL) -> URL? {
+        if savedVideo(ofFileAt: likely) == video, !isSnippedCopy(likely),
+           likely.standardizedFileURL.path.hasPrefix(url.standardizedFileURL.path + "/") {
+            return likely
+        }
+        return savedFiles()[video]
+    }
+
     /// What is at `relativePath` now, as far as `video` is concerned.
     public func occupant(of relativePath: String, for video: SavedVideo) -> FileOccupant {
         let file = url.appendingPathComponent(relativePath)

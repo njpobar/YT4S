@@ -25,7 +25,8 @@ public struct QueueRow: Equatable, Sendable {
     public var fraction: Double?
     public var showsProgress: Bool
     public var actions: [Action]
-    /// Raw yt-dlp output behind the Details disclosure (with Copy); only failed rows have it.
+    /// Raw yt-dlp (or, for a Snip, ffmpeg) output behind the Details disclosure (with Copy); only
+    /// failed rows and rows whose Snip failed have it.
     public var details: String?
 
     public init(_ item: QueueItem) {
@@ -66,7 +67,8 @@ public struct QueueRow: Equatable, Sendable {
     }
 
     /// A Done or Already downloaded row: `done` and its buttons then Snip and Show in Finder, or
-    /// its Snip's progress (no buttons), or `done - snipped` with both files for Show in Finder.
+    /// its Snip's progress with Cancel, or `done - snipped` with both files for Show in Finder, or
+    /// why its Snip failed, with Details.
     private mutating func applySnip(_ snip: SnipStatus?, done: String, file: URL, actions leading: [Action]) {
         switch snip {
         case nil:
@@ -77,11 +79,19 @@ public struct QueueRow: Equatable, Sendable {
             tone = .normal
             showsProgress = true
             fraction = snipFraction
+            actions = [.cancel]
         case .snipped(let copy):
             status = done + " - snipped"
             actions = leading + [.snip, .showInFinder([file, copy])]
+        case .failed(let failureDetails):
+            status = Self.snipFailedStatus
+            tone = .failure
+            details = failureDetails
+            actions = leading + [.snip, .showInFinder([file])]
         }
     }
+
+    static let snipFailedStatus = "Couldn't save the Snipped copy"
 
     private static func runningStatus(_ progress: DownloadProgress) -> String {
         guard let fraction = progress.fraction else { return "Starting..." }

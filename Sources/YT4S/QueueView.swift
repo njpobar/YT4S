@@ -52,9 +52,25 @@ struct QueueView: View {
         case .retry: queue.retry(id)
         case .remove: queue.remove(id)
         case .downloadAgain: queue.downloadAgain(id)
-        case .snip: openWindow(id: SnipWindow.id, value: id)
+        case .snip:
+            switch queue.prepareSnip(id) {
+            case .ready: openWindow(id: SnipWindow.id, value: id)
+            case .fileGone: showFileGoneAlert()
+            case nil: break
+            }
         case .showInFinder(let files): NSWorkspace.shared.activateFileViewerSelecting(files)
         }
+    }
+}
+
+private func showFileGoneAlert() {
+    let alert = NSAlert()
+    alert.messageText = SnipStart.fileGoneAlert
+    alert.addButton(withTitle: "OK")
+    if let window = NSApp.keyWindow {
+        alert.beginSheetModal(for: window)
+    } else {
+        alert.runModal()
     }
 }
 
@@ -114,7 +130,7 @@ private struct QueueRowView: View {
     }
 }
 
-/// The raw yt-dlp output of a failed row, collapsed under "Details", with Copy.
+/// The raw yt-dlp (or ffmpeg) output of a failed row, collapsed under "Details", with Copy.
 private struct FailureDetailsView: View {
     let text: String
 
@@ -122,7 +138,7 @@ private struct FailureDetailsView: View {
         DisclosureGroup {
             VStack(alignment: .leading, spacing: 6) {
                 ScrollView {
-                    Text(text.isEmpty ? "yt-dlp printed nothing." : text)
+                    Text(text.isEmpty ? "Nothing was printed." : text)
                         .font(.system(.caption, design: .monospaced))
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
