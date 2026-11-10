@@ -1,0 +1,52 @@
+#!/bin/zsh
+# Fake ffmpeg for Snip tests. Honors the subset of the real argv / output contract YT4S uses:
+# reads the input after -i, writes the output named by the last argument, and reports
+# `-progress pipe:1` style lines on stdout (out_time_us=..., progress=continue|end).
+#
+# The output is the input's bytes followed by "snipped\n", so a test can tell the copy from the
+# original and check the original was never written to.
+#
+# Environment:
+#   YT4S_FAKE_FFMPEG_OUT_TIMES      space-separated out_time_us values to report (default "0 1500000 3000000")
+#   YT4S_FAKE_FFMPEG_HOLD           if set, after the first progress block wait until
+#                                   YT4S_FAKE_FFMPEG_RELEASE_FILE exists (lets a test look mid-Snip)
+#   YT4S_FAKE_FFMPEG_RELEASE_FILE   see YT4S_FAKE_FFMPEG_HOLD
+#   YT4S_FAKE_FFMPEG_ARGV_LOG       if set, argv is written there, each element NUL-terminated
+#   YT4S_FAKE_FFMPEG_FAIL           if set, prints it on stderr and exits 1 without writing output
+
+emulate -L zsh
+setopt no_unset pipe_fail
+
+if [[ -n ${YT4S_FAKE_FFMPEG_ARGV_LOG:-} ]]; then
+  printf '%s\0' "$@" > "$YT4S_FAKE_FFMPEG_ARGV_LOG"
+fi
+
+input=""
+args=("$@")
+for (( i = 1; i < ${#args}; i++ )); do
+  [[ ${args[i]} == -i ]] && input=${args[i+1]}
+done
+output=${args[-1]}
+
+if [[ -z $input || ! -f $input ]]; then
+  print -u2 -- "$input: No such file or directory"
+  exit 1
+fi
+
+if [[ -n ${YT4S_FAKE_FFMPEG_FAIL:-} ]]; then
+  print -u2 -- "$YT4S_FAKE_FFMPEG_FAIL"
+  exit 1
+fi
+
+first=1
+for t in ${=${YT4S_FAKE_FFMPEG_OUT_TIMES:-0 1500000 3000000}}; do
+  print -- "out_time_us=$t"
+  print -- "progress=continue"
+  if (( first )) && [[ -n ${YT4S_FAKE_FFMPEG_HOLD:-} ]]; then
+    until [[ -e ${YT4S_FAKE_FFMPEG_RELEASE_FILE:?YT4S_FAKE_FFMPEG_HOLD needs YT4S_FAKE_FFMPEG_RELEASE_FILE} ]]; do sleep 0.02; done
+  fi
+  first=0
+done
+
+{ cat -- "$input"; print -- "snipped" } > "$output" || exit 1
+print -- "progress=end"

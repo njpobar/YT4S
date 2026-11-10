@@ -23,6 +23,8 @@ public final class Queue {
     /// What each Download folder already holds, scanned once per batch (a worker run) and kept up
     /// to date with what the batch saves. The folder is the only record (no ledger).
     @ObservationIgnored private var savedFiles: [URL: [SavedVideo: URL]] = [:]
+    /// Snips running, by row. They run alongside downloads, never in the worker.
+    @ObservationIgnored private var snips: [QueueItem.ID: Task<Void, Never>] = [:]
     /// The Looks-outdated banner and early stop.
     private var outdated = OutdatedBatch()
 
@@ -108,8 +110,9 @@ public final class Queue {
 
     /// Removes every finished and Already downloaded row, and dismisses the Looks-outdated banner.
     /// Files on disk are never touched.
+    /// Rows being snipped stay.
     public func clearFinished() {
-        items.removeAll(where: \.isDone)
+        items.removeAll { $0.isDone && !$0.isSnipping }
         dismissOutdatedBanner()
     }
 
@@ -120,7 +123,7 @@ public final class Queue {
 
     /// Removes one row that is not waiting or running. Files on disk are never touched.
     public func remove(_ id: QueueItem.ID) {
-        items.removeAll { $0.id == id && !$0.isActive }
+        items.removeAll { $0.id == id && !$0.isActive && !$0.isSnipping }
     }
 
     /// Re-runs a failed or cancelled item with its original request (Format, Quality preset,
@@ -139,6 +142,51 @@ public final class Queue {
     public func retryAllFailed() {
         for item in items where (item.isFailed && item.isRetryable) || item.state == .notStarted {
             retry(item.id)
+        }
+    }
+
+    // MARK: - Snip
+
+    /// Saves a Snipped copy of a Done row's file with `plan`'s Cuts left out, next to the
+    /// original, which is never changed. Runs at once, alongside any download; the row shows
+    /// "Snipping N%", then "Done - snipped". A Snip that fails leaves the row as it was. No effect
+    /// on other rows or while the row is already snipping.
+    public func snip(_ id: QueueItem.ID, plan: SnipPlan) {
+        guard let item = item(id), item.isSnippable, case .finished(let original) = item.state else { return }
+        let folder = DownloadFolder(url: item.request.downloadFolder)
+        guard let video = folder.savedVideo(ofFileAt: original)
+            ?? item.videoID.map({ SavedVideo(videoID: $0, format: item.request.options.format) }) else { return }
+        let before = item.snip
+        update(id) { $0.snip = .snipping(fraction: nil) }
+        let updates = Snipper(tools: runner.tools, environment: runner.environment).snip(original, video: video, plan: plan, in: folder)
+        let activity = ProcessInfo.processInfo.beginActivity(options: .userInitiated, reason: "Snipping a video")
+        snips[id] = Task { [weak self] in
+            defer { ProcessInfo.processInfo.endActivity(activity) }
+            var result = before
+            do {
+                for try await update in updates {
+                    switch update {
+                    case .progress(let fraction): self?.update(id) { $0.snip = .snipping(fraction: fraction) }
+                    case .saved(let copy): result = .snipped(copy: copy)
+                    }
+                }
+            } catch {
+                result = before
+            }
+            guard let self else { return }
+            self.update(id) { $0.snip = result }
+            self.snips[id] = nil
+            // The Snip's work folder is gone; the incomplete folder too, unless a download needs it.
+            if !self.items.contains(where: { $0.isActive && $0.request.downloadFolder == folder.url }) {
+                folder.removeIncompleteFolderIfEmpty()
+            }
+        }
+    }
+
+    /// Returns once no Snip is running.
+    public func waitUntilSnipsFinished() async {
+        while let snip = snips.values.first {
+            await snip.value
         }
     }
 

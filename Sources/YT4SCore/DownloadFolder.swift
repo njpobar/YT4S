@@ -102,14 +102,19 @@ public struct DownloadFolder: Equatable, Sendable {
         try fileManager.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
         // Fails rather than replaces if a file appeared there meanwhile.
         try fileManager.moveItem(at: downloaded, to: destination)
-        for (name, value) in [(Self.videoIDAttribute, video.videoID), (Self.formatAttribute, video.format.rawValue)] {
-            let bytes = Array(value.utf8)
-            guard setxattr(destination.path, name, bytes, bytes.count, 0, 0) == 0 else {
-                throw CocoaError(.fileWriteUnknown, userInfo: [NSFilePathErrorKey: destination.path])
-            }
-        }
+        try tag(destination, with: video)
         removeIncompleteFolderIfEmpty()
         return .placed(destination)
+    }
+
+    /// Tags a saved file with its video ID and Format, so `savedFiles` finds it under any name.
+    public func tag(_ file: URL, with video: SavedVideo) throws {
+        for (name, value) in [(Self.videoIDAttribute, video.videoID), (Self.formatAttribute, video.format.rawValue)] {
+            let bytes = Array(value.utf8)
+            guard setxattr(file.path, name, bytes, bytes.count, 0, 0) == 0 else {
+                throw CocoaError(.fileWriteUnknown, userInfo: [NSFilePathErrorKey: file.path])
+            }
+        }
     }
 
     /// Deletes a download that will not be placed (failed or cancelled after yt-dlp wrote it).
@@ -120,11 +125,11 @@ public struct DownloadFolder: Equatable, Sendable {
         removeIncompleteFolderIfEmpty()
     }
 
-    /// Best effort: leave nothing behind once no download is in progress.
-    private func removeIncompleteFolderIfEmpty() {
-        if (try? FileManager.default.contentsOfDirectory(atPath: incompleteFolder.path))?.isEmpty == true {
-            try? FileManager.default.removeItem(at: incompleteFolder)
-        }
+    /// Best effort: leave nothing behind once no download is in progress. `rmdir` removes only an
+    /// empty folder, in one step, so a Snip's work folder made meanwhile is never deleted. Never
+    /// call it while yt-dlp may be downloading into this folder: it writes there only at the end.
+    public func removeIncompleteFolderIfEmpty() {
+        rmdir(incompleteFolder.path)
     }
 
     private static func attribute(_ name: String, of file: URL) -> String? {

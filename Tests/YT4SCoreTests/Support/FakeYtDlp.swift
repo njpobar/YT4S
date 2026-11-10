@@ -25,9 +25,18 @@ struct FakeYtDlp {
         try FileManager.default.createDirectory(at: downloadFolder, withIntermediateDirectories: true)
         argvLog = root.appendingPathComponent("argv.log")
 
+        // ffmpeg is `Fixtures/fake-ffmpeg`, for Snip.
+        guard let fakeFFmpeg = Bundle.module.url(forResource: "fake-ffmpeg", withExtension: nil, subdirectory: "Fixtures") else {
+            throw FixtureError.missing("Fixtures/fake-ffmpeg")
+        }
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fakeFFmpeg.path)
+        let bin = root.appendingPathComponent("bin", isDirectory: true)
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: bin.appendingPathComponent("ffmpeg"), withDestinationURL: fakeFFmpeg)
+
         tools = BundledTools(
             ytDlp: url,
-            ffmpegDirectory: URL(fileURLWithPath: "/nonexistent/bin", isDirectory: true),
+            ffmpegDirectory: bin,
             deno: URL(fileURLWithPath: "/nonexistent/bin/deno")
         )
     }
@@ -83,6 +92,25 @@ struct FakeYtDlp {
 
         func release() throws { try Data().write(to: releaseFile) }
     }
+
+    /// Pauses the fake ffmpeg after its first progress report until `release()`, so a test can
+    /// look at a row mid-Snip.
+    func holdSnip() -> SnipHold {
+        SnipHold(releaseFile: argvLog.deletingLastPathComponent().appendingPathComponent("release-snip"))
+    }
+
+    struct SnipHold {
+        let releaseFile: URL
+
+        var environment: [String: String] {
+            ["YT4S_FAKE_FFMPEG_HOLD": "1", "YT4S_FAKE_FFMPEG_RELEASE_FILE": releaseFile.path]
+        }
+
+        func release() throws { try Data().write(to: releaseFile) }
+    }
+
+    /// Where the fake ffmpeg writes its argv, when `YT4S_FAKE_FFMPEG_ARGV_LOG` is set to it.
+    var ffmpegArgvLog: URL { argvLog.deletingLastPathComponent().appendingPathComponent("ffmpeg-argv.log") }
 
     /// Where the fake writes its pid on start, when `YT4S_FAKE_PID_FILE` is set to it.
     var pidFile: URL { argvLog.deletingLastPathComponent().appendingPathComponent("pid") }

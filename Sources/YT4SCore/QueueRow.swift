@@ -12,7 +12,10 @@ public struct QueueRow: Equatable, Sendable {
         case retry
         case remove
         case downloadAgain
-        case showInFinder(URL)
+        /// Opens the Snip window for the row's file.
+        case snip
+        /// Reveals these files in Finder, selected together.
+        case showInFinder([URL])
     }
 
     public var title: String
@@ -42,9 +45,20 @@ public struct QueueRow: Equatable, Sendable {
             fraction = progress.fraction
             status = Self.runningStatus(progress)
         case .finished(let file):
-            status = "Done"
-            tone = .success
-            actions = [.showInFinder(file)]
+            switch item.snip {
+            case nil:
+                status = "Done"
+                tone = .success
+                actions = [.snip, .showInFinder([file])]
+            case .snipping(let snipFraction):
+                status = snipFraction.map { "Snipping \(Self.percent($0))" } ?? "Snipping..."
+                showsProgress = true
+                fraction = snipFraction
+            case .snipped(let copy):
+                status = "Done - snipped"
+                tone = .success
+                actions = [.snip, .showInFinder([file, copy])]
+            }
         case .failed(let failure):
             status = failure.category.sentence
             tone = .failure
@@ -53,7 +67,7 @@ public struct QueueRow: Equatable, Sendable {
         case .alreadyDownloaded(let file):
             status = "Already downloaded"
             tone = .skipped
-            actions = [.downloadAgain, .showInFinder(file)]
+            actions = [.downloadAgain, .showInFinder([file])]
         case .cancelled:
             status = "Cancelled"
             actions = [.retry, .remove]
@@ -65,10 +79,14 @@ public struct QueueRow: Equatable, Sendable {
 
     private static func runningStatus(_ progress: DownloadProgress) -> String {
         guard let fraction = progress.fraction else { return "Starting..." }
-        var parts = ["\(Int((fraction * 100).rounded(.down)))%"]
+        var parts = [percent(fraction)]
         if let speed = progress.speed, speed > 0 { parts.append(speedText(speed)) }
         if let eta = progress.eta, fraction < 1 { parts.append(etaText(eta)) }
         return parts.joined(separator: " - ")
+    }
+
+    private static func percent(_ fraction: Double) -> String {
+        "\(Int((fraction * 100).rounded(.down)))%"
     }
 
     private static func speedText(_ bytesPerSecond: Double) -> String {

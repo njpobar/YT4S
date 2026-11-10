@@ -30,5 +30,15 @@ struct YT4SApp: App {
         }
         .defaultSize(width: 640, height: 760)
         .windowResizability(.contentMinSize)
+
+        // One Snip window per Queue row, opened by its Snip button only (no File > New).
+        WindowGroup("Snip", id: SnipWindow.id, for: QueueItem.ID.self) { $itemID in
+            if let models {
+                SnipWindow(queue: models.window.queue, itemID: itemID)
+            }
+        }
+        .defaultSize(width: 820, height: 600)
+        .windowResizability(.contentMinSize)
+        .commandsRemoved()
     }
 }

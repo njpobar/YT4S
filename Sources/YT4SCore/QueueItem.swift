@@ -29,6 +29,15 @@ public enum QueueItemState: Equatable, Sendable {
     case notStarted
 }
 
+/// A Snip of a Done row's file (`GLOSSARY.md`). It never changes the row's own state: the
+/// download stays finished, so the Queue summary and the batch notification never count it.
+public enum SnipStatus: Equatable, Sendable {
+    /// ffmpeg is writing the Snipped copy; `fraction` is `nil` until it reports progress.
+    case snipping(fraction: Double?)
+    /// The latest Snip saved this Snipped copy next to the original.
+    case snipped(copy: URL)
+}
+
 /// One video in the Queue.
 public struct QueueItem: Identifiable, Equatable, Sendable {
     public let id: UUID
@@ -44,6 +53,8 @@ public struct QueueItem: Identifiable, Equatable, Sendable {
     /// Set by Download again: skip detection leaves it alone and it is saved as a new file under
     /// the collision rule, never over the copy already there.
     public internal(set) var downloadAgain = false
+    /// The row's Snip, if it has one: running, or the Snipped copy it saved.
+    public internal(set) var snip: SnipStatus?
 
     public init(id: UUID = UUID(), request: DownloadRequest, title: String? = nil, videoID: String? = nil, state: QueueItemState = .pending) {
         self.id = id
@@ -71,6 +82,12 @@ public struct QueueItem: Identifiable, Equatable, Sendable {
         case .finished, .alreadyDownloaded, .failed, .cancelled, .notStarted: false
         }
     }
+
+    /// Whether ffmpeg is writing a Snipped copy of this row's file.
+    public var isSnipping: Bool { if case .snipping = snip { true } else { false } }
+
+    /// A Done row with no Snip running: what Snip accepts.
+    public var isSnippable: Bool { isFinished && !isSnipping }
 
     /// Finished or Already downloaded: what "Clear finished" removes.
     public var isDone: Bool {

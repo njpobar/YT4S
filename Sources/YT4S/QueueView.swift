@@ -4,6 +4,7 @@ import YT4SCore
 /// The Queue: header summary with Retry all failed and Clear finished, then one row per video.
 struct QueueView: View {
     let queue: Queue
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -51,7 +52,8 @@ struct QueueView: View {
         case .retry: queue.retry(id)
         case .remove: queue.remove(id)
         case .downloadAgain: queue.downloadAgain(id)
-        case .showInFinder(let file): NSWorkspace.shared.activateFileViewerSelecting([file])
+        case .snip: openWindow(id: SnipWindow.id, value: id)
+        case .showInFinder(let files): NSWorkspace.shared.activateFileViewerSelecting(files)
         }
     }
 }
@@ -148,6 +150,7 @@ private extension QueueRow.Action {
         case .retry: "Retry"
         case .remove: "Remove"
         case .downloadAgain: "Download again"
+        case .snip: "Snip"
         case .showInFinder: "Show in Finder"
         }
     }
