@@ -86,9 +86,10 @@ public final class SnipEditor {
 
     /// What playback reaching `time` does so it previews the Snipped copy: skip over the Cut it
     /// is in, or, in a Cut running to the end of the file, stop just before it (so play can
-    /// start again). `nil` outside every Cut.
+    /// start again). `nil` outside every Cut, and within `seekSlack` of a Cut's end: a skip lands
+    /// there, as the player rounds a seek to its 1/600 s grid, and must play on from it.
     public func playbackJump(at time: Double) -> PlaybackJump? {
-        guard let cut = cuts.first(where: { $0.start <= time && time < $0.end }) else { return nil }
+        guard let cut = cuts.first(where: { $0.start <= time && time < $0.end - Self.seekSlack }) else { return nil }
         return cut.end >= duration ? .stop(at: max(cut.start - Self.stopMargin, 0)) : .skip(to: cut.end)
     }
 
@@ -110,6 +111,8 @@ public final class SnipEditor {
 
     /// How far before an end Cut playback stops, so the playhead is outside it.
     private static let stopMargin = 0.001
+    /// How far before its target a seek may land (the player's grid is 1/600 s).
+    private static let seekSlack = 0.005
     /// How near the last kept moment counts as the end of the preview.
     private static let endSlack = 0.05
 

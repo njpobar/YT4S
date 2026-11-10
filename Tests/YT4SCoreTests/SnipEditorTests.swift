@@ -191,6 +191,15 @@ import Testing
         #expect(editor.playbackJump(at: 10) == nil)
     }
 
+    @Test func playbackLandingAHairBeforeACutsEndPlaysOn() {
+        // A seek to the end lands on the player's 1/600 s grid, up to a few ms before it.
+        let editor = editor()
+        cut(editor, 20, 30.0333333)
+
+        #expect(editor.playbackJump(at: 30.031666666666666) == nil)
+        #expect(editor.playbackJump(at: 30.02) == .skip(to: 30.0333333))
+    }
+
     @Test func playbackReachingACutAtTheEndStopsJustBeforeIt() {
         let editor = editor()
         cut(editor, 50, 60)
