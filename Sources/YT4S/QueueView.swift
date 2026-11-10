@@ -63,6 +63,7 @@ struct QueueView: View {
     }
 }
 
+@MainActor
 private func showFileGoneAlert() {
     let alert = NSAlert()
     alert.messageText = SnipStart.fileGoneAlert
